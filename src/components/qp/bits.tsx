@@ -47,18 +47,27 @@ export function KV({
   value,
   warn,
   bold,
+  keyBold = true,
 }: {
   label: string;
   value: ReactNode;
   warn?: boolean;
   bold?: boolean;
+  keyBold?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-3 py-1">
-      <span className="w-44 shrink-0 text-right text-[15px] text-muted-foreground">{label}</span>
       <span
         className={cn(
-          "text-left text-[15px] tabular-nums",
+          "w-44 shrink-0 text-right text-[15px]",
+          keyBold ? "font-semibold text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {label}:
+      </span>
+      <span
+        className={cn(
+          "text-left text-[15px] tabular-nums text-foreground",
           bold && "font-semibold",
           warn && "font-medium text-warning",
         )}
