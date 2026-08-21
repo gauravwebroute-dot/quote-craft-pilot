@@ -197,6 +197,7 @@ function PricingGroup({
 }
 
 interface PartDetailCardProps {
+  id?: string;
   partNumber: string;
   name: string;
   total: string;
@@ -237,6 +238,7 @@ interface PartDetailCardProps {
 }
 
 function PartDetailCard({
+  id,
   partNumber,
   name,
   total,
@@ -257,9 +259,10 @@ function PartDetailCard({
 
   return (
     <div
-      className={`rounded-xl border transition-all ${
+      id={id}
+      className={`scroll-mt-28 rounded-xl border transition-all duration-300 ${
         isSelected
-          ? "border-primary/80 ring-2 ring-primary/20 bg-card shadow-sm"
+          ? "border-primary ring-2 ring-primary/30 bg-card shadow-md"
           : "border-border bg-card hover:border-muted-foreground/30 shadow-2xs"
       }`}
     >
@@ -560,16 +563,30 @@ export function SectionExtraction({
   const [customerOpen, setCustomerOpen] = useState(true);
   const [activePartId, setActivePartId] = useState<string>("part-1");
 
-  // Keep active part synced if user selected one from Tree Menu
+  // Auto-scroll and keep active part in sync when submenu item is clicked
   useEffect(() => {
-    if (focusedSection === "part-1" || focusedSection === "part-2" || focusedSection === "part-3") {
+    if (!focusedSection || focusedSection === "all") return;
+
+    if (focusedSection.startsWith("part-")) {
       setActivePartId(focusedSection);
     }
-  }, [focusedSection]);
 
-  const showCustomer = !focusedSection || focusedSection === "all" || focusedSection === "customer";
-  const showSummary = !focusedSection || focusedSection === "all" || focusedSection === "summary";
-  const showParts = !focusedSection || focusedSection === "all" || focusedSection.startsWith("part-");
+    let targetId = "";
+    if (focusedSection === "customer") targetId = "section-customer";
+    else if (focusedSection === "summary") targetId = "section-summary";
+    else if (focusedSection === "parts") targetId = "section-parts";
+    else if (focusedSection.startsWith("part-")) targetId = `section-${focusedSection}`;
+
+    if (targetId) {
+      const timer = setTimeout(() => {
+        const element = document.getElementById(targetId);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [focusedSection]);
 
   return (
     <div className="space-y-6">
@@ -585,28 +602,31 @@ export function SectionExtraction({
           </p>
         </div>
 
-        {/* Section View Switcher / Filter Pills */}
+        {/* Section View Switcher / Quick Jump Navigation Pills */}
         <div className="flex flex-wrap items-center gap-1.5 bg-muted/60 p-1 rounded-lg text-xs">
           <Button
             variant={!focusedSection || focusedSection === "all" ? "default" : "ghost"}
             size="sm"
-            className="h-7 px-2.5 text-xs"
-            onClick={() => onSelectSection?.("all")}
+            className="h-7 px-2.5 text-xs font-medium"
+            onClick={() => {
+              onSelectSection?.("all");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
           >
             All Sections
           </Button>
           <Button
             variant={focusedSection === "customer" ? "default" : "ghost"}
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className="h-7 px-2.5 text-xs font-medium"
             onClick={() => onSelectSection?.("customer")}
           >
-            Customer
+            Customer Info
           </Button>
           <Button
             variant={focusedSection === "summary" ? "default" : "ghost"}
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className="h-7 px-2.5 text-xs font-medium"
             onClick={() => onSelectSection?.("summary")}
           >
             Part Summary
@@ -614,7 +634,7 @@ export function SectionExtraction({
           <Button
             variant={focusedSection?.startsWith("part-") ? "default" : "ghost"}
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className="h-7 px-2.5 text-xs font-medium"
             onClick={() => onSelectSection?.("part-1")}
           >
             Part Details
@@ -638,8 +658,14 @@ export function SectionExtraction({
       </Alert>
 
       {/* 1. CUSTOMER INFORMATION */}
-      {showCustomer && (
-        <Card id="section-customer" className="transition-colors hover:border-muted-foreground/30 shadow-2xs">
+      <Card
+        id="section-customer"
+        className={`scroll-mt-28 transition-all duration-300 shadow-2xs ${
+          focusedSection === "customer"
+            ? "border-primary ring-2 ring-primary/30"
+            : "hover:border-muted-foreground/30"
+        }`}
+      >
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div className="flex items-center gap-2.5">
               <CardTitle className="text-xl font-semibold">Customer Information</CardTitle>
@@ -673,11 +699,16 @@ export function SectionExtraction({
             </CardContent>
           ) : null}
         </Card>
-      )}
 
       {/* 2. PART SUMMARY */}
-      {showSummary && (
-        <Card id="section-summary" className="overflow-hidden border border-border shadow-2xs transition-colors hover:border-muted-foreground/30">
+      <Card
+        id="section-summary"
+        className={`scroll-mt-28 overflow-hidden border transition-all duration-300 shadow-2xs ${
+          focusedSection === "summary"
+            ? "border-primary ring-2 ring-primary/30"
+            : "border-border hover:border-muted-foreground/30"
+        }`}
+      >
           {/* Header Banner - Navy Blue matching mockup */}
           <div className="bg-[#1e3a5f] text-white px-4 py-3 sm:px-6 flex items-center justify-between">
             <h2 className="text-base sm:text-lg font-bold tracking-wide uppercase">PART SUMMARY</h2>
@@ -725,9 +756,6 @@ export function SectionExtraction({
                 </thead>
                 <tbody>
                   {summaryRows.map((r, idx) => {
-                    // Alternating row colors requested by user:
-                    // Odd rows (Row #1, #3, #5) -> white
-                    // Even rows (Row #2, #4) -> light grey
                     const isEvenRow = (idx + 1) % 2 === 0;
                     const isSelected = activePartId === r.id;
 
@@ -737,6 +765,10 @@ export function SectionExtraction({
                         onClick={() => {
                           setActivePartId(r.id);
                           onSelectSection?.(r.id);
+                          const el = document.getElementById(`section-${r.id}`);
+                          if (el) {
+                            el.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }
                         }}
                         className={`
                           border-b border-slate-200 dark:border-border/60 transition-colors cursor-pointer
@@ -791,6 +823,10 @@ export function SectionExtraction({
                             onClick={() => {
                               setActivePartId(r.id);
                               onSelectSection?.(r.id);
+                              const el = document.getElementById(`section-${r.id}`);
+                              if (el) {
+                                el.scrollIntoView({ behavior: "smooth", block: "start" });
+                              }
                             }}
                           >
                             View Tabs
@@ -818,342 +854,345 @@ export function SectionExtraction({
             </div>
           </CardContent>
         </Card>
-      )}
 
       {/* 3. PART DETAILS (Nested Part Tabs) */}
-      {showParts && (
-        <Card id="section-parts" className="transition-colors hover:border-muted-foreground/30 shadow-2xs">
-          <CardHeader className="pb-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-xl font-semibold">Part Details</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Select a part to view its Specifications, Pricing Breakdown, and Notes
-                </p>
-              </div>
-
-              {/* Quick Part Switcher */}
-              <div className="flex flex-wrap gap-1.5 bg-muted/60 p-1 rounded-lg">
-                {summaryRows.map((r) => (
-                  <Button
-                    key={r.id}
-                    variant={activePartId === r.id ? "default" : "ghost"}
-                    size="sm"
-                    className="h-8 text-xs font-semibold"
-                    onClick={() => {
-                      setActivePartId(r.id);
-                      onSelectSection?.(r.id);
-                    }}
-                  >
-                    {r.num}. {r.partNumber}
-                  </Button>
-                ))}
-              </div>
+      <Card
+        id="section-parts"
+        className={`scroll-mt-28 transition-all duration-300 shadow-2xs ${
+          focusedSection === "parts"
+            ? "border-primary ring-2 ring-primary/30"
+            : "hover:border-muted-foreground/30"
+        }`}
+      >
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-xl font-semibold">Part Details</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                All 5 extracted parts with Specifications, Pricing Breakdown, and Notes
+              </p>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* PART 1 */}
-            {(focusedSection === "all" || !focusedSection || activePartId === "part-1") && (
-              <PartDetailCard
-                partNumber="PN-A1025"
-                name="Part Number 1"
-                total="$140.00"
-                qty="4"
-                pricePerUnit="$35.00"
-                area="100"
-                maskArea="20"
-                rev="C00"
-                material="Aluminum 6061-T6"
-                prep="Media blasting & solvent degrease"
-                drawingFile="Filename1.pdf"
-                coatingBom={coatingBomPart1}
-                isSelected={activePartId === "part-1"}
-                pricingData={{
-                  unitPrice: "$35.00",
-                  calcTotal: "$140.00",
-                  maskingCost: "$4.50",
-                  maskingRows: [
-                    ["Area", "20 Sq In"],
-                    ["Holes", "4 Openings"],
-                    ["Time", "6 min @ $35.56/hr"],
-                  ],
-                  blastingCost: "$5.20",
-                  blastingRows: [
-                    ["Area", "100 Sq In"],
-                    ["Time", "4 min @ $35.56/hr"],
-                  ],
-                  coatingCost: "$18.30",
-                  coatingRows: [
-                    ["Area", "100 Sq In"],
-                    ["Time", "8 min @ $45.56/hr"],
-                    ["Material", "0.6 Oz @ $12.50/oz"],
-                    ["Color Complexity", "Cerakote Camo Green FED-STD-595"],
-                    ["Oven Time", "30 min @ $20.38/hr"],
-                  ],
-                  partMarkRows: [
-                    ["Part Mark", "+ $1.00 (Typical: $1/mark)"],
-                    ["Extra work", "+ $0.00"],
-                    ["Extra resource", "+ $0.00"],
-                  ],
-                  totalLabor: "$22.15",
-                  totalMaterial: "$7.50",
-                  totalTime: "00:28 min",
-                  ratePsi: "$0.35 / PSI",
-                  partCost: "$29.65",
-                }}
-                notesData={{
-                  warningTitle: "Surface finish requires delicate aluminum oxide blast profile.",
-                  method: "Visual & CAD STEP Extraction",
-                  dimensions: "Accurate surface area calculated from model views.",
-                  reasoning: "Confirmed coating thickness tolerance: 1.0 - 1.5 mils.",
-                  estimatorNote: "Ensure green camo powder batch is calibrated.",
-                  defaultEstimatorNote: "Verified rivet panel mounting tolerances.",
-                }}
-              />
-            )}
 
-            {/* PART 2 */}
-            {(focusedSection === "all" || activePartId === "part-2") && (
-              <PartDetailCard
-                partNumber="XJ-2048B"
-                name="Part Number 2"
-                total="$392.00"
-                qty="7"
-                pricePerUnit="$56.00"
-                area="200"
-                maskArea="35"
-                rev="A00"
-                material="Steel ASTM A36"
-                prep="Solvent degrease & blast"
-                drawingFile="Filename2.stp"
-                coatingBom={coatingBomPart2}
-                isSelected={activePartId === "part-2"}
-                pricingData={{
-                  unitPrice: "$56.00",
-                  calcTotal: "$392.00",
-                  maskingCost: "$8.50",
-                  maskingRows: [
-                    ["Area", "35 Sq In"],
-                    ["Plugs / Caps", "2 Silicon Plugs"],
-                    ["Time", "8 min @ $35.56/hr"],
-                  ],
-                  blastingCost: "$9.20",
-                  blastingRows: [
-                    ["Area", "200 Sq In"],
-                    ["Time", "6 min @ $35.56/hr"],
-                  ],
-                  coatingCost: "$28.30",
-                  coatingRows: [
-                    ["Area", "200 Sq In"],
-                    ["Time", "12 min @ $45.56/hr"],
-                    ["Material", "1.1 Oz @ $8.50/oz"],
-                    ["Color Complexity", "Gloss Black RAL 9005 TGIC"],
-                    ["Oven Time", "25 min @ $20.38/hr"],
-                  ],
-                  partMarkRows: [
-                    ["Part Mark", "+ $0.50 (Laser etch)"],
-                    ["Extra work", "+ $0.00"],
-                    ["Extra resource", "+ $0.00"],
-                  ],
-                  totalLabor: "$36.40",
-                  totalMaterial: "$9.35",
-                  totalTime: "00:45 min",
-                  ratePsi: "$0.28 / PSI",
-                  partCost: "$45.75",
-                }}
-                notesData={{
-                  warningTitle: "Inner bore requires precision plug masking to maintain 0.001\" bearing tolerance.",
-                  method: "Direct CAD Step Model extraction",
-                  dimensions: "Accurate surface area extracted from STEP model file.",
-                  reasoning: "High-confidence geometric calculation.",
-                  estimatorNote: "Ensure high-temp silicone taper plugs are in stock.",
-                  defaultEstimatorNote: "Verified bearing surface tolerance with customer engineering.",
-                }}
-              />
-            )}
+            {/* Quick Part Switcher */}
+            <div className="flex flex-wrap gap-1.5 bg-muted/60 p-1 rounded-lg">
+              {summaryRows.map((r) => (
+                <Button
+                  key={r.id}
+                  variant={activePartId === r.id ? "default" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs font-semibold"
+                  onClick={() => {
+                    setActivePartId(r.id);
+                    onSelectSection?.(r.id);
+                    const el = document.getElementById(`section-${r.id}`);
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }
+                  }}
+                >
+                  {r.num}. {r.partNumber}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* PART 1 */}
+          <PartDetailCard
+            id="section-part-1"
+            partNumber="PN-A1025"
+            name="Part Number 1"
+            total="$140.00"
+            qty="4"
+            pricePerUnit="$35.00"
+            area="100"
+            maskArea="20"
+            rev="C00"
+            material="Aluminum 6061-T6"
+            prep="Media blasting & solvent degrease"
+            drawingFile="Filename1.pdf"
+            coatingBom={coatingBomPart1}
+            isSelected={activePartId === "part-1"}
+            pricingData={{
+              unitPrice: "$35.00",
+              calcTotal: "$140.00",
+              maskingCost: "$4.50",
+              maskingRows: [
+                ["Area", "20 Sq In"],
+                ["Holes", "4 Openings"],
+                ["Time", "6 min @ $35.56/hr"],
+              ],
+              blastingCost: "$5.20",
+              blastingRows: [
+                ["Area", "100 Sq In"],
+                ["Time", "4 min @ $35.56/hr"],
+              ],
+              coatingCost: "$18.30",
+              coatingRows: [
+                ["Area", "100 Sq In"],
+                ["Time", "8 min @ $45.56/hr"],
+                ["Material", "0.6 Oz @ $12.50/oz"],
+                ["Color Complexity", "Cerakote Camo Green FED-STD-595"],
+                ["Oven Time", "30 min @ $20.38/hr"],
+              ],
+              partMarkRows: [
+                ["Part Mark", "+ $1.00 (Typical: $1/mark)"],
+                ["Extra work", "+ $0.00"],
+                ["Extra resource", "+ $0.00"],
+              ],
+              totalLabor: "$22.15",
+              totalMaterial: "$7.50",
+              totalTime: "00:28 min",
+              ratePsi: "$0.35 / PSI",
+              partCost: "$29.65",
+            }}
+            notesData={{
+              warningTitle: "Surface finish requires delicate aluminum oxide blast profile.",
+              method: "Visual & CAD STEP Extraction",
+              dimensions: "Accurate surface area calculated from model views.",
+              reasoning: "Confirmed coating thickness tolerance: 1.0 - 1.5 mils.",
+              estimatorNote: "Ensure green camo powder batch is calibrated.",
+              defaultEstimatorNote: "Verified rivet panel mounting tolerances.",
+            }}
+          />
 
-            {/* PART 3 */}
-            {(focusedSection === "all" || activePartId === "part-3") && (
-              <PartDetailCard
-                partNumber="CKT-3175"
-                name="Part Number 3"
-                total="$189.00"
-                qty="3"
-                pricePerUnit="$63.00"
-                area="150"
-                maskArea="25"
-                rev="D10"
-                material="Cold Rolled Sheet Metal"
-                prep="Phosphate pre-treatment"
-                drawingFile="Filename3.step"
-                coatingBom={coatingBomPart3}
-                isSelected={activePartId === "part-3"}
-                pricingData={{
-                  unitPrice: "$63.00",
-                  calcTotal: "$189.00",
-                  maskingCost: "$9.00",
-                  maskingRows: [
-                    ["Area", "25 Sq In"],
-                    ["Grounding Pads", "4 Masked zones"],
-                    ["Time", "12 min @ $35.56/hr"],
-                  ],
-                  blastingCost: "$8.00",
-                  blastingRows: [
-                    ["Area", "150 Sq In"],
-                    ["Time", "6 min @ $35.56/hr"],
-                  ],
-                  coatingCost: "$34.00",
-                  coatingRows: [
-                    ["Area", "150 Sq In"],
-                    ["Time", "15 min @ $45.56/hr"],
-                    ["Material", "0.9 Oz @ $14.50/oz"],
-                    ["Color Complexity", "Cerakote Textured Camo"],
-                    ["Oven Time", "30 min @ $20.38/hr"],
-                  ],
-                  partMarkRows: [
-                    ["Part Mark", "+ $1.00 (Silk screen)"],
-                    ["Extra work", "+ $0.00"],
-                    ["Extra resource", "+ $0.00"],
-                  ],
-                  totalLabor: "$39.50",
-                  totalMaterial: "$13.05",
-                  totalTime: "00:52 min",
-                  ratePsi: "$0.42 / PSI",
-                  partCost: "$52.55",
-                }}
-                notesData={{
-                  warningTitle: "Grounding zones require precision die-cut dot masking.",
-                  method: "CAD 3D STEP analysis with 2-tone overlay",
-                  dimensions: "Outer envelope 15\" x 10\" sheet curvature.",
-                  reasoning: "Requires custom rack hanging orientation.",
-                  estimatorNote: "Confirm grounding pad conductivity test protocol.",
-                  defaultEstimatorNote: "Customer requested sample swatch approval prior to production.",
-                }}
-              />
-            )}
+          {/* PART 2 */}
+          <PartDetailCard
+            id="section-part-2"
+            partNumber="XJ-2048B"
+            name="Part Number 2"
+            total="$392.00"
+            qty="7"
+            pricePerUnit="$56.00"
+            area="200"
+            maskArea="35"
+            rev="A00"
+            material="Steel ASTM A36"
+            prep="Solvent degrease & blast"
+            drawingFile="Filename2.stp"
+            coatingBom={coatingBomPart2}
+            isSelected={activePartId === "part-2"}
+            pricingData={{
+              unitPrice: "$56.00",
+              calcTotal: "$392.00",
+              maskingCost: "$8.50",
+              maskingRows: [
+                ["Area", "35 Sq In"],
+                ["Plugs / Caps", "2 Silicon Plugs"],
+                ["Time", "8 min @ $35.56/hr"],
+              ],
+              blastingCost: "$9.20",
+              blastingRows: [
+                ["Area", "200 Sq In"],
+                ["Time", "6 min @ $35.56/hr"],
+              ],
+              coatingCost: "$28.30",
+              coatingRows: [
+                ["Area", "200 Sq In"],
+                ["Time", "12 min @ $45.56/hr"],
+                ["Material", "1.1 Oz @ $8.50/oz"],
+                ["Color Complexity", "Gloss Black RAL 9005 TGIC"],
+                ["Oven Time", "25 min @ $20.38/hr"],
+              ],
+              partMarkRows: [
+                ["Part Mark", "+ $0.50 (Laser etch)"],
+                ["Extra work", "+ $0.00"],
+                ["Extra resource", "+ $0.00"],
+              ],
+              totalLabor: "$36.40",
+              totalMaterial: "$9.35",
+              totalTime: "00:45 min",
+              ratePsi: "$0.28 / PSI",
+              partCost: "$45.75",
+            }}
+            notesData={{
+              warningTitle: "Inner bore requires precision plug masking to maintain 0.001\" bearing tolerance.",
+              method: "Direct CAD Step Model extraction",
+              dimensions: "Accurate surface area extracted from STEP model file.",
+              reasoning: "High-confidence geometric calculation.",
+              estimatorNote: "Ensure high-temp silicone taper plugs are in stock.",
+              defaultEstimatorNote: "Verified bearing surface tolerance with customer engineering.",
+            }}
+          />
 
-            {/* PART 4 */}
-            {(focusedSection === "all" || activePartId === "part-4") && (
-              <PartDetailCard
-                partNumber="PC-4821X"
-                name="Part Number 4"
-                total="$511.50"
-                qty="6"
-                pricePerUnit="$85.25"
-                area="275"
-                maskArea="45"
-                rev="B02"
-                material="Steel Plate 1/4-inch"
-                prep="Iron phosphate wash & blast"
-                drawingFile="Filename4.step"
-                coatingBom={coatingBomPart4}
-                isSelected={activePartId === "part-4"}
-                pricingData={{
-                  unitPrice: "$85.25",
-                  calcTotal: "$511.50",
-                  maskingCost: "$12.00",
-                  maskingRows: [
-                    ["Area", "45 Sq In"],
-                    ["Holes", "6 Threaded holes"],
-                    ["Time", "12 min @ $35.56/hr"],
-                  ],
-                  blastingCost: "$14.50",
-                  blastingRows: [
-                    ["Area", "275 Sq In"],
-                    ["Time", "10 min @ $35.56/hr"],
-                  ],
-                  coatingCost: "$44.75",
-                  coatingRows: [
-                    ["Area", "275 Sq In"],
-                    ["Time", "18 min @ $45.56/hr"],
-                    ["Material", "1.6 Oz @ $9.00/oz"],
-                    ["Color Complexity", "RAL 7035 Light Grey TGIC"],
-                    ["Oven Time", "20 min @ $20.38/hr"],
-                  ],
-                  partMarkRows: [
-                    ["Part Mark", "+ $1.00 (Dot peen)"],
-                    ["Extra work", "+ $0.00"],
-                    ["Extra resource", "+ $0.00"],
-                  ],
-                  totalLabor: "$54.20",
-                  totalMaterial: "$14.40",
-                  totalTime: "01:05 hr",
-                  ratePsi: "$0.31 / PSI",
-                  partCost: "$68.60",
-                }}
-                notesData={{
-                  warningTitle: "Threaded holes must be clean of any coating buildup.",
-                  method: "CAD 3D STEP analysis",
-                  dimensions: "Heavy steel flange bracket structure.",
-                  reasoning: "Requires silicone pull plugs during powder spray.",
-                  estimatorNote: "Check thread gauge M8 x 1.25 post-cure.",
-                  defaultEstimatorNote: "Batch bake at 400°F verified with thermal probe.",
-                }}
-              />
-            )}
+          {/* PART 3 */}
+          <PartDetailCard
+            id="section-part-3"
+            partNumber="CKT-3175"
+            name="Part Number 3"
+            total="$189.00"
+            qty="3"
+            pricePerUnit="$63.00"
+            area="150"
+            maskArea="25"
+            rev="D10"
+            material="Cold Rolled Sheet Metal"
+            prep="Phosphate pre-treatment"
+            drawingFile="Filename3.step"
+            coatingBom={coatingBomPart3}
+            isSelected={activePartId === "part-3"}
+            pricingData={{
+              unitPrice: "$63.00",
+              calcTotal: "$189.00",
+              maskingCost: "$9.00",
+              maskingRows: [
+                ["Area", "25 Sq In"],
+                ["Grounding Pads", "4 Masked zones"],
+                ["Time", "12 min @ $35.56/hr"],
+              ],
+              blastingCost: "$8.00",
+              blastingRows: [
+                ["Area", "150 Sq In"],
+                ["Time", "6 min @ $35.56/hr"],
+              ],
+              coatingCost: "$34.00",
+              coatingRows: [
+                ["Area", "150 Sq In"],
+                ["Time", "15 min @ $45.56/hr"],
+                ["Material", "0.9 Oz @ $14.50/oz"],
+                ["Color Complexity", "Cerakote Textured Camo"],
+                ["Oven Time", "30 min @ $20.38/hr"],
+              ],
+              partMarkRows: [
+                ["Part Mark", "+ $1.00 (Silk screen)"],
+                ["Extra work", "+ $0.00"],
+                ["Extra resource", "+ $0.00"],
+              ],
+              totalLabor: "$39.50",
+              totalMaterial: "$13.05",
+              totalTime: "00:52 min",
+              ratePsi: "$0.42 / PSI",
+              partCost: "$52.55",
+            }}
+            notesData={{
+              warningTitle: "Grounding zones require precision die-cut dot masking.",
+              method: "CAD 3D STEP analysis with 2-tone overlay",
+              dimensions: "Outer envelope 15\" x 10\" sheet curvature.",
+              reasoning: "Requires custom rack hanging orientation.",
+              estimatorNote: "Confirm grounding pad conductivity test protocol.",
+              defaultEstimatorNote: "Customer requested sample swatch approval prior to production.",
+            }}
+          />
 
-            {/* PART 5 */}
-            {(focusedSection === "all" || activePartId === "part-5") && (
-              <PartDetailCard
-                partNumber="MFG-5903"
-                name="Part Number 5"
-                total="$384.00"
-                qty="5"
-                pricePerUnit="$76.80"
-                area="320"
-                maskArea="60"
-                rev="E01"
-                material="Aluminum 5052-H32"
-                prep="Ultrasonic degrease & bake dry"
-                drawingFile="Filename5.step"
-                coatingBom={coatingBomPart5}
-                isSelected={activePartId === "part-5"}
-                pricingData={{
-                  unitPrice: "$76.80",
-                  calcTotal: "$384.00",
-                  maskingCost: "$15.00",
-                  maskingRows: [
-                    ["Area", "60 Sq In"],
-                    ["Cavity", "Electronics chamber gasket"],
-                    ["Time", "15 min @ $35.56/hr"],
-                  ],
-                  blastingCost: "$12.00",
-                  blastingRows: [
-                    ["Area", "320 Sq In"],
-                    ["Time", "8 min @ $35.56/hr"],
-                  ],
-                  coatingCost: "$38.80",
-                  coatingRows: [
-                    ["Area", "320 Sq In"],
-                    ["Time", "16 min @ $45.56/hr"],
-                    ["Material", "1.4 Oz @ $13.50/oz"],
-                    ["Color Complexity", "Cerakote H-146 Graphite Black Matte"],
-                    ["Oven Time", "60 min @ $20.38/hr"],
-                  ],
-                  partMarkRows: [
-                    ["Part Mark", "+ $1.00 (Laser QR code)"],
-                    ["Extra work", "+ $0.00"],
-                    ["Extra resource", "+ $0.00"],
-                  ],
-                  totalLabor: "$48.50",
-                  totalMaterial: "$18.90",
-                  totalTime: "01:20 hr",
-                  ratePsi: "$0.24 / PSI",
-                  partCost: "$67.40",
-                }}
-                notesData={{
-                  warningTitle: "Internal cavity is an RF shield zone and must remain un-coated.",
-                  method: "Direct STEP model analysis",
-                  dimensions: "Enclosure housing 12\" x 8\" x 4\".",
-                  reasoning: "Requires custom cut high-temp silicone gasket mask.",
-                  estimatorNote: "Ensure Cerakote H-146 matte finish uniformity.",
-                  defaultEstimatorNote: "Verify lid and base alignment post-thermal cure.",
-                }}
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
+          {/* PART 4 */}
+          <PartDetailCard
+            id="section-part-4"
+            partNumber="PC-4821X"
+            name="Part Number 4"
+            total="$511.50"
+            qty="6"
+            pricePerUnit="$85.25"
+            area="275"
+            maskArea="45"
+            rev="B02"
+            material="Steel Plate 1/4-inch"
+            prep="Iron phosphate wash & blast"
+            drawingFile="Filename4.step"
+            coatingBom={coatingBomPart4}
+            isSelected={activePartId === "part-4"}
+            pricingData={{
+              unitPrice: "$85.25",
+              calcTotal: "$511.50",
+              maskingCost: "$12.00",
+              maskingRows: [
+                ["Area", "45 Sq In"],
+                ["Holes", "6 Threaded holes"],
+                ["Time", "12 min @ $35.56/hr"],
+              ],
+              blastingCost: "$14.50",
+              blastingRows: [
+                ["Area", "275 Sq In"],
+                ["Time", "10 min @ $35.56/hr"],
+              ],
+              coatingCost: "$44.75",
+              coatingRows: [
+                ["Area", "275 Sq In"],
+                ["Time", "18 min @ $45.56/hr"],
+                ["Material", "1.6 Oz @ $9.00/oz"],
+                ["Color Complexity", "RAL 7035 Light Grey TGIC"],
+                ["Oven Time", "20 min @ $20.38/hr"],
+              ],
+              partMarkRows: [
+                ["Part Mark", "+ $1.00 (Dot peen)"],
+                ["Extra work", "+ $0.00"],
+                ["Extra resource", "+ $0.00"],
+              ],
+              totalLabor: "$54.20",
+              totalMaterial: "$14.40",
+              totalTime: "01:05 hr",
+              ratePsi: "$0.31 / PSI",
+              partCost: "$68.60",
+            }}
+            notesData={{
+              warningTitle: "Threaded holes must be clean of any coating buildup.",
+              method: "CAD 3D STEP analysis",
+              dimensions: "Heavy steel flange bracket structure.",
+              reasoning: "Requires silicone pull plugs during powder spray.",
+              estimatorNote: "Check thread gauge M8 x 1.25 post-cure.",
+              defaultEstimatorNote: "Batch bake at 400°F verified with thermal probe.",
+            }}
+          />
+
+          {/* PART 5 */}
+          <PartDetailCard
+            id="section-part-5"
+            partNumber="MFG-5903"
+            name="Part Number 5"
+            total="$384.00"
+            qty="5"
+            pricePerUnit="$76.80"
+            area="320"
+            maskArea="60"
+            rev="E01"
+            material="Aluminum 5052-H32"
+            prep="Ultrasonic degrease & bake dry"
+            drawingFile="Filename5.step"
+            coatingBom={coatingBomPart5}
+            isSelected={activePartId === "part-5"}
+            pricingData={{
+              unitPrice: "$76.80",
+              calcTotal: "$384.00",
+              maskingCost: "$15.00",
+              maskingRows: [
+                ["Area", "60 Sq In"],
+                ["Cavity", "Electronics chamber gasket"],
+                ["Time", "15 min @ $35.56/hr"],
+              ],
+              blastingCost: "$12.00",
+              blastingRows: [
+                ["Area", "320 Sq In"],
+                ["Time", "8 min @ $35.56/hr"],
+              ],
+              coatingCost: "$38.80",
+              coatingRows: [
+                ["Area", "320 Sq In"],
+                ["Time", "16 min @ $45.56/hr"],
+                ["Material", "1.4 Oz @ $13.50/oz"],
+                ["Color Complexity", "Cerakote H-146 Graphite Black Matte"],
+                ["Oven Time", "60 min @ $20.38/hr"],
+              ],
+              partMarkRows: [
+                ["Part Mark", "+ $1.00 (Laser QR code)"],
+                ["Extra work", "+ $0.00"],
+                ["Extra resource", "+ $0.00"],
+              ],
+              totalLabor: "$48.50",
+              totalMaterial: "$18.90",
+              totalTime: "01:20 hr",
+              ratePsi: "$0.24 / PSI",
+              partCost: "$67.40",
+            }}
+            notesData={{
+              warningTitle: "Internal cavity is an RF shield zone and must remain un-coated.",
+              method: "Direct STEP model analysis",
+              dimensions: "Enclosure housing 12\" x 8\" x 4\".",
+              reasoning: "Requires custom cut high-temp silicone gasket mask.",
+              estimatorNote: "Ensure Cerakote H-146 matte finish uniformity.",
+              defaultEstimatorNote: "Verify lid and base alignment post-thermal cure.",
+            }}
+          />
+        </CardContent>
+      </Card>
 
       {/* Navigation Buttons */}
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
