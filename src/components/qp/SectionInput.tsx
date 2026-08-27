@@ -21,10 +21,19 @@ John
 ABC Company
 714-555-1212`;
 
-export function SectionInput({ onRun }: { onRun: () => void }) {
+export type ExtractionResult = {
+  customer: Record<string, string | null>;
+  parts: Array<Record<string, unknown>>;
+  extractionNotes: string[];
+};
+
+export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [emailText, setEmailText] = useState(emailBody);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const addFiles = (selectedFiles: FileList | File[]) => {
     const validFiles = Array.from(selectedFiles).filter((file) =>
@@ -53,9 +62,9 @@ export function SectionInput({ onRun }: { onRun: () => void }) {
         </CardHeader>
         <CardContent className="space-y-3">
           <Label htmlFor="rfq-email">Paste the customer&apos;s RFQ email content</Label>
-          <Textarea id="rfq-email" className="min-h-[250px]" defaultValue={emailBody} />
+          <Textarea id="rfq-email" className="min-h-[250px]" value={emailText} onChange={(event) => setEmailText(event.target.value)} />
           <div className="flex justify-end">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => setEmailText("")}>
               Clear
             </Button>
           </div>
@@ -125,6 +134,7 @@ export function SectionInput({ onRun }: { onRun: () => void }) {
               </div>
             ))}
             {!uploadedFiles.length && <p className="text-sm text-muted-foreground">No files selected yet.</p>}
+            {error && <p className="text-sm font-medium text-destructive">{error}</p>}
           </div>
         </CardContent>
       </Card>
@@ -184,8 +194,27 @@ export function SectionInput({ onRun }: { onRun: () => void }) {
                 </SelectContent>
               </Select>
             </div>
-            <Button size="lg" onClick={onRun}>
-              RUN Extraction <ArrowRight className="size-4" />
+            <Button size="lg" disabled={isExtracting} onClick={async () => {
+              setError(null);
+              setIsExtracting(true);
+              try {
+                const formData = new FormData();
+                uploadedFiles.forEach((file) => formData.append("files", file));
+                if (emailText.trim()) formData.append("emailText", emailText.trim());
+                const response = await fetch(`${import.meta.env.VITE_EXTRACTION_API_URL || "http://localhost:4000"}/api/extract`, {
+                  method: "POST",
+                  body: formData,
+                });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.message || "Extraction failed.");
+                onRun(payload.extraction);
+              } catch (requestError) {
+                setError(requestError instanceof Error ? requestError.message : "Extraction failed.");
+              } finally {
+                setIsExtracting(false);
+              }
+            }}>
+              {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
             </Button>
           </div>
         </CardContent>
