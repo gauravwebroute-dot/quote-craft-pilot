@@ -66,11 +66,15 @@ appropriate HTTP status (400 for bad input, 500/503 for upstream issues).
 ## Testing it with the two drawings we already have
 
 ```bash
-curl -X POST http://localhost:4000/api/extract \
-  -F "files=@117_0018_001_C_OP__2_.pdf" \
-  -F "files=@117_0019_001_C_OP__2_.pdf" \
+curl.exe -X POST http://localhost:4000/api/extract \
+  -F "files=@backend/117_0018_001_C_OP__2_.pdf" \
+  -F "files=@backend/117_0019_001_C_OP__2_.pdf" \
   -F "emailText=Request for quote to apply CARC powder coating to two riveted assemblies per drawings 117-0018-001 and 117-0019-001."
 ```
+
+On Windows PowerShell, use `curl.exe` rather than `curl`; `curl` is commonly
+an alias for PowerShell's `Invoke-WebRequest`, which does not support curl's
+`-F` multipart form syntax.
 
 **Important — set expectations before testing**: both of these are
 *assembly* drawings with an isometric 3D view and no dimension callouts
