@@ -201,7 +201,8 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                 const formData = new FormData();
                 uploadedFiles.forEach((file) => formData.append("files", file));
                 if (emailText.trim()) formData.append("emailText", emailText.trim());
-                const response = await fetch(`${import.meta.env.VITE_EXTRACTION_API_URL || "http://localhost:4000"}/api/extract`, {
+                const apiUrl = import.meta.env.VITE_EXTRACTION_API_URL || "http://localhost:4000";
+                const response = await fetch(`${apiUrl}/api/extract`, {
                   method: "POST",
                   body: formData,
                 });
@@ -209,7 +210,7 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                 if (!response.ok) throw new Error(payload.message || "Extraction failed.");
                 onRun(payload.extraction);
               } catch (requestError) {
-                setError(requestError instanceof Error ? requestError.message : "Extraction failed.");
+                setError(requestError instanceof TypeError ? "Backend se connection nahi ho paaya. Confirm backend http://localhost:4000 par running hai aur app ko refresh karein." : requestError instanceof Error ? requestError.message : "Extraction failed.");
               } finally {
                 setIsExtracting(false);
               }
