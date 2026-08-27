@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: quote-pilot-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: EXTRACTION_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        value: https://quote-craft-pilot.vercel.app
+      - key: ODOO_URL
+        sync: false
+      - key: ODOO_DB
+        sync: false
+      - key: ODOO_USERNAME
+        sync: false
+      - key: ODOO_API_KEY
+        sync: false

@@ -125,6 +125,23 @@ fabricated number.
 $/sq-in, labor rate, and overhead numbers. `pricingEngine.js` itself
 shouldn't need to change.
 
+### `POST /api/odoo/cross-check`
+
+Checks whether the customer and part already have a matching record. Without
+Odoo credentials, the endpoint uses built-in dummy records so the workflow can
+be tested safely. For example, `ABC Metal Works` with email
+`john@abcmetalworks.com` and part `117-0018-001` returns an existing customer
+and previous unit price of `$105.32`; a new part returns no previous quote.
+
+Live Odoo checks require all of `ODOO_URL`, `ODOO_DB`, `ODOO_USERNAME`, and
+`ODOO_API_KEY`. `ODOO_DB` cannot be omitted for Odoo JSON-RPC authentication;
+keep using dummy mode until the database name is available.
+
+The root `render.yaml` configures the backend service with automatic deploys
+from the GitHub `main` branch. Enable **Auto-Deploy: Yes** on the existing
+Render service, or create the service from the Blueprint once, then future
+pushes deploy automatically.
+
 ## What's next (not built yet)
 
 1. ~~Pricing engine~~ ✅ built — see `POST /api/price` above.
