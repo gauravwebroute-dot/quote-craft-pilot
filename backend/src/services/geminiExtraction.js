@@ -23,7 +23,6 @@ const MAX_TRANSIENT_RETRIES = 2;
 function isTransientProviderError(error) {
   return error?.status === 429 || error?.status === 503;
 }
->>>>>>> 93d0d02 (feat: add extraction and pricing backend)
 
 /**
  * Same signature/return shape as claudeExtraction.js's extractFromFiles,
