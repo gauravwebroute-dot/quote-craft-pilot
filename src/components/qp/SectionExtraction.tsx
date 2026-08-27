@@ -635,7 +635,7 @@ export function SectionExtraction({
             Review each part&apos;s coating specs, pricing, and notes before Odoo cross-check.
           </p>
           <p className="mt-1.5 text-xs font-medium text-muted-foreground">
-            Extracted with Gemini 2.5 Pro · 47 fields · 3 flagged for review
+            Extracted with Gemini 3.6 Flash · 47 fields · 3 flagged for review
           </p>
         </div>
 
