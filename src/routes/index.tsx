@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { TopNav } from "@/components/qp/TopNav";
-import { Stepper } from "@/components/qp/Stepper";
 import { RfqHeader } from "@/components/qp/RfqHeader";
 import { SectionInput } from "@/components/qp/SectionInput";
 import { SectionExtraction } from "@/components/qp/SectionExtraction";
@@ -32,8 +31,14 @@ export const Route = createFileRoute("/")({
 
 function QuotePilot() {
   const [step, setStep] = useState(1);
-  const [focusedSection, setFocusedSection] = useState<string>("all");
+  const [focusedSection, setFocusedSection] = useState<string>("summary");
   const [sidebarVisible, setSidebarVisible] = useState(true);
+
+  // Quote number: QP<year>-0001. NOTE - the "0001" here is a placeholder.
+  // A real auto-incrementing-per-year counter needs to live in a backend/
+  // database (so two estimators never get the same number) - this frontend
+  // can only display whatever number the backend hands it once that exists.
+  const quoteNumber = `QP${new Date().getFullYear().toString().slice(-2)}-0001`;
 
   const handleNavigate = (target: NavigationTarget) => {
     setStep(target.step);
@@ -45,13 +50,6 @@ function QuotePilot() {
   return (
     <div className="min-h-screen bg-background font-sans text-foreground">
       <TopNav />
-      <Stepper
-        active={step}
-        onChange={(s) => {
-          setStep(s);
-          setFocusedSection("all");
-        }}
-      />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Mobile / Quick Sidebar Toggle */}
@@ -85,25 +83,20 @@ function QuotePilot() {
                 currentStep={step}
                 currentSection={focusedSection}
                 onNavigate={handleNavigate}
+                quoteNumber={quoteNumber}
               />
             </aside>
           )}
 
           {/* Main Workspace / Section Content */}
-          <div
-            className={
-              sidebarVisible
-                ? "lg:col-span-9 space-y-6"
-                : "lg:col-span-12 space-y-6"
-            }
-          >
+          <div className={sidebarVisible ? "lg:col-span-9 space-y-6" : "lg:col-span-12 space-y-6"}>
             <RfqHeader />
 
             {step === 0 ? (
               <SectionInput
                 onRun={() => {
                   setStep(1);
-                  setFocusedSection("all");
+                  setFocusedSection("summary");
                 }}
               />
             ) : null}
@@ -112,11 +105,11 @@ function QuotePilot() {
               <SectionExtraction
                 onBack={() => {
                   setStep(0);
-                  setFocusedSection("all");
+                  setFocusedSection("summary");
                 }}
                 onContinue={() => {
                   setStep(2);
-                  setFocusedSection("all");
+                  setFocusedSection("summary");
                 }}
                 focusedSection={focusedSection}
                 onSelectSection={(sec) => setFocusedSection(sec)}
@@ -127,7 +120,7 @@ function QuotePilot() {
               <SectionOdoo
                 onBack={() => {
                   setStep(1);
-                  setFocusedSection("all");
+                  setFocusedSection("summary");
                 }}
               />
             ) : null}
