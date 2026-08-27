@@ -125,6 +125,7 @@ function QuotePilot() {
                   setStep(1);
                   setFocusedSection("summary");
                 }}
+                extraction={extraction}
               />
             ) : null}
           </div>
