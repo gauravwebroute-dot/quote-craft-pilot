@@ -34,7 +34,17 @@ export function TreeMenu({
   className,
 }: TreeMenuProps) {
   const [extractionExpanded, setExtractionExpanded] = useState(true);
+  const [partDetailsExpanded, setPartDetailsExpanded] = useState(true);
   const [odooExpanded, setOdooExpanded] = useState(true);
+
+  const partList: { id: "part-1" | "part-2" | "part-3" | "part-4" | "part-5"; label: string }[] = [
+    { id: "part-1", label: "PN-A1025" },
+    { id: "part-2", label: "XJ-2048B" },
+    { id: "part-3", label: "CKT-3175" },
+    { id: "part-4", label: "PC-4821X" },
+    { id: "part-5", label: "MFG-5903" },
+  ];
+  const isPartSectionActive = currentStep === 1 && currentSection.startsWith("part-");
 
   return (
     <nav
@@ -146,6 +156,67 @@ export function TreeMenu({
                   $1,616.50
                 </span>
               </button>
+
+              {/* Part Details branch - header highlights whenever ANY part is selected */}
+              <div>
+                <div
+                  className={cn(
+                    "flex items-center rounded-md transition-colors",
+                    isPartSectionActive
+                      ? "bg-primary/90 text-primary-foreground font-semibold"
+                      : "text-[#f5d76e] hover:bg-white/10",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPartDetailsExpanded(!partDetailsExpanded);
+                    }}
+                    className={cn(
+                      "p-1.5",
+                      isPartSectionActive
+                        ? "text-primary-foreground/80 hover:opacity-80"
+                        : "text-white/60 hover:text-white",
+                    )}
+                    aria-label="Toggle Part Details menu"
+                  >
+                    {partDetailsExpanded ? (
+                      <ChevronDown className="size-3" />
+                    ) : (
+                      <ChevronRight className="size-3" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate({ step: 1, section: "part-1" })}
+                    className="flex flex-1 items-center gap-2 py-1.5 pr-2 text-left text-xs sm:text-sm font-medium"
+                  >
+                    <Box className="size-3.5 shrink-0" />
+                    <span className="truncate">Part Details</span>
+                  </button>
+                </div>
+
+                {partDetailsExpanded && (
+                  <div className="ml-4 space-y-0.5 border-l-2 border-white/15 pl-2">
+                    {partList.map((part) => (
+                      <button
+                        key={part.id}
+                        type="button"
+                        onClick={() => onNavigate({ step: 1, section: part.id })}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] sm:text-xs transition-colors font-medium",
+                          currentStep === 1 && currentSection === part.id
+                            ? "bg-primary text-primary-foreground font-semibold"
+                            : "text-[#f5d76e] hover:bg-white/10",
+                        )}
+                      >
+                        <span className="truncate">{part.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
