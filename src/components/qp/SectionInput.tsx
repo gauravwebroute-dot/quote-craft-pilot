@@ -21,9 +21,29 @@ John
 ABC Company
 714-555-1212`;
 
+export type ExtractionPart = {
+  partNumber: string | null;
+  partName: string | null;
+  revision: string | null;
+  isAssembly: boolean | null;
+  existingCoating: string | null;
+  material: string | null;
+  partMark: boolean | null;
+  partMarkSpec: string | null;
+  prepType: string | null;
+  hasScale: boolean | null;
+  quantity: number | null;
+  totalSurfaceAreaSqIn: number | null;
+  coatingAreaSqIn: number | null;
+  maskingAreaSqIn: number | null;
+  areaConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
+  coatingBom: Record<string, string | null>;
+  sourceDrawingFile: string | null;
+};
+
 export type ExtractionResult = {
   customer: Record<string, string | null>;
-  parts: Array<Record<string, unknown>>;
+  parts: ExtractionPart[];
   extractionNotes: string[];
 };
 
@@ -36,9 +56,10 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
   const [error, setError] = useState<string | null>(null);
 
   const addFiles = (selectedFiles: FileList | File[]) => {
-    const validFiles = Array.from(selectedFiles).filter((file) =>
-      ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
-      file.size <= 20 * 1024 * 1024
+    const validFiles = Array.from(selectedFiles).filter(
+      (file) =>
+        ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
+        file.size <= 20 * 1024 * 1024,
     );
     setUploadedFiles((current) => [...current, ...validFiles].slice(0, 10));
   };
@@ -62,7 +83,12 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
         </CardHeader>
         <CardContent className="space-y-3">
           <Label htmlFor="rfq-email">Paste the customer&apos;s RFQ email content</Label>
-          <Textarea id="rfq-email" className="min-h-[250px]" value={emailText} onChange={(event) => setEmailText(event.target.value)} />
+          <Textarea
+            id="rfq-email"
+            className="min-h-[250px]"
+            value={emailText}
+            onChange={(event) => setEmailText(event.target.value)}
+          />
           <div className="flex justify-end">
             <Button variant="ghost" size="sm" onClick={() => setEmailText("")}>
               Clear
@@ -106,10 +132,16 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                 event.target.value = "";
               }}
             />
-            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={(event) => {
-              event.stopPropagation();
-              fileInputRef.current?.click();
-            }}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-4"
+              onClick={(event) => {
+                event.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+            >
               Browse files
             </Button>
           </div>
@@ -121,19 +153,30 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
               >
                 <FileText className="size-5 text-muted-foreground" />
                 <span className="text-base font-medium">{file.name}</span>
-                <span className="text-sm text-muted-foreground">{(file.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 0 })} KB</span>
+                <span className="text-sm text-muted-foreground">
+                  {(file.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 0 })} KB
+                </span>
                 <Badge variant="neutral">{file.name.split(".").pop()?.toUpperCase()}</Badge>
                 <div className="ml-auto flex items-center gap-1">
                   <Button type="button" variant="ghost" size="sm" onClick={() => openFile(file)}>
                     <Eye className="size-4" /> View
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setUploadedFiles((current) => current.filter((item) => item !== file))}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setUploadedFiles((current) => current.filter((item) => item !== file))
+                    }
+                  >
                     <X className="size-4" /> Remove
                   </Button>
                 </div>
               </div>
             ))}
-            {!uploadedFiles.length && <p className="text-sm text-muted-foreground">No files selected yet.</p>}
+            {!uploadedFiles.length && (
+              <p className="text-sm text-muted-foreground">No files selected yet.</p>
+            )}
             {error && <p className="text-sm font-medium text-destructive">{error}</p>}
           </div>
         </CardContent>
@@ -194,27 +237,40 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                 </SelectContent>
               </Select>
             </div>
-            <Button size="lg" disabled={isExtracting} onClick={async () => {
-              setError(null);
-              setIsExtracting(true);
-              try {
-                const formData = new FormData();
-                uploadedFiles.forEach((file) => formData.append("files", file));
-                if (emailText.trim()) formData.append("emailText", emailText.trim());
-                const apiUrl = (import.meta.env.VITE_EXTRACTION_API_URL || "https://quote-craft-pilot.onrender.com").replace(/\/$/, "");
-                const response = await fetch(`${apiUrl}/api/extract`, {
-                  method: "POST",
-                  body: formData,
-                });
-                const payload = await response.json();
-                if (!response.ok) throw new Error(payload.message || "Extraction failed.");
-                onRun(payload.extraction);
-              } catch (requestError) {
-                setError(requestError instanceof TypeError ? "Unable to connect to the extraction service. Please try again or contact support." : requestError instanceof Error ? requestError.message : "Extraction failed.");
-              } finally {
-                setIsExtracting(false);
-              }
-            }}>
+            <Button
+              size="lg"
+              disabled={isExtracting}
+              onClick={async () => {
+                setError(null);
+                setIsExtracting(true);
+                try {
+                  const formData = new FormData();
+                  uploadedFiles.forEach((file) => formData.append("files", file));
+                  if (emailText.trim()) formData.append("emailText", emailText.trim());
+                  const apiUrl = (
+                    import.meta.env["VITE_EXTRACTION_API_URL"] ||
+                    "https://quote-craft-pilot.onrender.com"
+                  ).replace(/\/$/, "");
+                  const response = await fetch(`${apiUrl}/api/extract`, {
+                    method: "POST",
+                    body: formData,
+                  });
+                  const payload = await response.json();
+                  if (!response.ok) throw new Error(payload.message || "Extraction failed.");
+                  onRun(payload.extraction);
+                } catch (requestError) {
+                  setError(
+                    requestError instanceof TypeError
+                      ? "Unable to connect to the extraction service. Please try again or contact support."
+                      : requestError instanceof Error
+                        ? requestError.message
+                        : "Extraction failed.",
+                  );
+                } finally {
+                  setIsExtracting(false);
+                }
+              }}
+            >
               {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
             </Button>
           </div>

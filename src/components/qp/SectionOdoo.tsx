@@ -73,8 +73,24 @@ const partRows = [
   },
 ];
 
-export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extraction?: ExtractionResult | null }) {
-  const [crossCheck, setCrossCheck] = useState<Record<string, unknown> | null>(null);
+type CrossCheckResult = {
+  mode: string;
+  message: string;
+  customer?: { matched?: boolean } | null;
+  parts: Array<{
+    partNumber?: string;
+    previousQuote?: { pricePerUnit?: number; quotedAt?: string } | null;
+  }>;
+};
+
+export function SectionOdoo({
+  onBack,
+  extraction,
+}: {
+  onBack: () => void;
+  extraction?: ExtractionResult | null;
+}) {
+  const [crossCheck, setCrossCheck] = useState<CrossCheckResult | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,7 +102,9 @@ export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extrac
     setIsChecking(true);
     setError(null);
     try {
-      const apiUrl = (import.meta.env.VITE_EXTRACTION_API_URL || "https://quote-craft-pilot.onrender.com").replace(/\/$/, "");
+      const apiUrl = (
+        import.meta.env["VITE_EXTRACTION_API_URL"] || "https://quote-craft-pilot.onrender.com"
+      ).replace(/\/$/, "");
       const response = await fetch(`${apiUrl}/api/odoo/cross-check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -96,7 +114,13 @@ export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extrac
       if (!response.ok) throw new Error(payload.message || "Odoo cross-check failed.");
       setCrossCheck(payload);
     } catch (requestError) {
-      setError(requestError instanceof TypeError ? "Unable to connect to the Odoo cross-check service." : requestError instanceof Error ? requestError.message : "Odoo cross-check failed.");
+      setError(
+        requestError instanceof TypeError
+          ? "Unable to connect to the Odoo cross-check service."
+          : requestError instanceof Error
+            ? requestError.message
+            : "Odoo cross-check failed.",
+      );
     } finally {
       setIsChecking(false);
     }
@@ -118,28 +142,43 @@ export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extrac
         <Badge variant="neutral">BU: Maverick Powder Coating</Badge>
       </div>
 
-      {error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {crossCheck ? (
         <Card className="border-primary/30 shadow-2xs">
           <CardHeader>
             <CardTitle className="text-xl font-semibold">Live Odoo Cross-Check</CardTitle>
-            <p className="text-sm text-muted-foreground">Mode: {String(crossCheck.mode)}. {String(crossCheck.message)}</p>
+            <p className="text-sm text-muted-foreground">
+              Mode: {crossCheck.mode}. {crossCheck.message}
+            </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
               <span className="font-medium">Customer match:</span>
-              <Badge variant={(crossCheck.customer as { matched?: boolean })?.matched ? "success" : "warning"}>
-                {(crossCheck.customer as { matched?: boolean })?.matched ? "Existing customer" : "New customer"}
+              <Badge variant={crossCheck.customer?.matched ? "success" : "warning"}>
+                {crossCheck.customer?.matched ? "Existing customer" : "New customer"}
               </Badge>
             </div>
             <div className="space-y-2">
-              {(crossCheck.parts as Array<{ partNumber?: string; previousQuote?: { pricePerUnit?: number; quotedAt?: string } | null }>).map((part, index) => (
-                <div key={`${part.partNumber}-${index}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+              {crossCheck.parts.map((part, index) => (
+                <div
+                  key={`${part.partNumber}-${index}`}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
+                >
                   <span className="font-medium">{part.partNumber || "Unknown part"}</span>
                   {part.previousQuote ? (
-                    <span className="text-sm">Previous price: <strong>${part.previousQuote.pricePerUnit?.toFixed(2)}</strong> ({part.previousQuote.quotedAt})</span>
-                  ) : <span className="text-sm text-muted-foreground">No previous quote found</span>}
+                    <span className="text-sm">
+                      Previous price:{" "}
+                      <strong>${part.previousQuote.pricePerUnit?.toFixed(2)}</strong> (
+                      {part.previousQuote.quotedAt})
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">No previous quote found</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -166,12 +205,7 @@ export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extrac
                 </AlertDescription>
               </Alert>
               <div>
-                <CompareRow
-                  label="Email"
-                  value="john@email.com"
-                  status="Existing"
-                  tone="success"
-                />
+                <CompareRow label="Email" value="john@email.com" status="Existing" tone="success" />
                 <CompareRow
                   label="Company"
                   value="ABC Metal Works - S9"
@@ -179,12 +213,7 @@ export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extrac
                   tone="success"
                 />
                 <CompareRow label="Contact" value="James Smith" status="Existing" tone="success" />
-                <CompareRow
-                  label="Phone"
-                  value="714-555-1212"
-                  status="Not found"
-                  tone="warning"
-                />
+                <CompareRow label="Phone" value="714-555-1212" status="Not found" tone="warning" />
                 <CompareRow
                   label="Address"
                   value="123 Main St, Los Angeles, CA 90024"
@@ -206,7 +235,12 @@ export function SectionOdoo({ onBack, extraction }: { onBack: () => void; extrac
                 </AlertDescription>
               </Alert>
               <div>
-                <CompareRow label="Email" value="john@email.com" status="Not found" tone="warning" />
+                <CompareRow
+                  label="Email"
+                  value="john@email.com"
+                  status="Not found"
+                  tone="warning"
+                />
                 <CompareRow
                   label="Company"
                   value="ABC Metal Works Inc"

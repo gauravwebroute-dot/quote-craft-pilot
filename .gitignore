@@ -23,6 +23,15 @@ dist-ssr
 # Vercel
 .vercel
 
+# Customer/client drawings and part files - these can carry ITAR/EAR export
+# control markings and must never be committed to this (or any) git repo.
+# Use local-only storage or a properly access-controlled document system.
+backend/*.pdf
+*.step
+*.stp
+*.sldprt
+*.sldasm
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
