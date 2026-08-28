@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import extractRouter from "./routes/extract.js";
 import priceRouter from "./routes/price.js";
+import odooRouter from "./routes/odoo.js";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -17,11 +18,23 @@ if (provider === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
   process.exit(1);
 }
 
-const allowedOrigins = (process.env.CORS_ORIGIN || "").split(",").map((s) => s.trim()).filter(Boolean);
+const allowedOrigins = new Set(
+  (process.env.CORS_ORIGIN || "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/$/, ""))
+    .filter(Boolean)
+);
+allowedOrigins.add("https://quote-craft-pilot.vercel.app");
 
 app.use(
   cors({
-    origin: allowedOrigins.length ? allowedOrigins : true,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin) || /^https?:\/\/localhost(?::\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`Origin not allowed: ${origin}`));
+    },
   })
 );
 app.use(express.json({ limit: "2mb" }));
@@ -30,6 +43,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use("/api", extractRouter);
 app.use("/api", priceRouter);
+app.use("/api", odooRouter);
 
 // Catch-all 404
 app.use((_req, res) => res.status(404).json({ error: "NOT_FOUND" }));

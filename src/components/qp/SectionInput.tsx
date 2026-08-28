@@ -3,6 +3,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { useRef, useState } from "react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
@@ -11,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileText, Upload, Wrench, X, ArrowRight } from "lucide-react";
+import { FileText, Upload, X, ArrowRight, Eye } from "lucide-react";
 
 const emailBody = `Hi,
 Could we please get pricing for the attached items? The qty will be 6 each.
@@ -20,13 +21,32 @@ John
 ABC Company
 714-555-1212`;
 
-const files = [
-  { name: "Filename1.pdf", size: "5,426 KB", badge: "PDF", cad: false },
-  { name: "Filename2.stp", size: "6,426 KB", badge: "CAD — accurate surface area", cad: true },
-  { name: "Filename3.step", size: "7,426 KB", badge: "CAD — accurate surface area", cad: true },
-];
+export type ExtractionResult = {
+  customer: Record<string, string | null>;
+  parts: Array<Record<string, unknown>>;
+  extractionNotes: string[];
+};
 
-export function SectionInput({ onRun }: { onRun: () => void }) {
+export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [emailText, setEmailText] = useState(emailBody);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const addFiles = (selectedFiles: FileList | File[]) => {
+    const validFiles = Array.from(selectedFiles).filter((file) =>
+      ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
+      file.size <= 20 * 1024 * 1024
+    );
+    setUploadedFiles((current) => [...current, ...validFiles].slice(0, 10));
+  };
+
+  const openFile = (file: File) => {
+    window.open(URL.createObjectURL(file), "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -42,9 +62,9 @@ export function SectionInput({ onRun }: { onRun: () => void }) {
         </CardHeader>
         <CardContent className="space-y-3">
           <Label htmlFor="rfq-email">Paste the customer&apos;s RFQ email content</Label>
-          <Textarea id="rfq-email" className="min-h-[250px]" defaultValue={emailBody} />
+          <Textarea id="rfq-email" className="min-h-[250px]" value={emailText} onChange={(event) => setEmailText(event.target.value)} />
           <div className="flex justify-end">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => setEmailText("")}>
               Clear
             </Button>
           </div>
@@ -56,40 +76,65 @@ export function SectionInput({ onRun }: { onRun: () => void }) {
           <CardTitle className="text-xl font-semibold">Upload Drawings</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface px-6 py-10 text-center">
+          <div
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface px-6 py-10 text-center ${isDragging ? "border-primary bg-accent" : ""}`}
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setIsDragging(false);
+              addFiles(event.dataTransfer.files);
+            }}
+          >
             <Upload className="size-7 text-muted-foreground" />
             <p className="mt-3 text-base font-medium">Drop drawing files here</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Upload or drop drawing files. Limit 200 MB per file. Supported: PDF, STP, STEP
+              Upload or drop files. Limit 20 MB per file. Supported: PDF, PNG, JPEG, WEBP
             </p>
-            <Button variant="outline" size="sm" className="mt-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                if (event.target.files) addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={(event) => {
+              event.stopPropagation();
+              fileInputRef.current?.click();
+            }}>
               Browse files
             </Button>
           </div>
           <div className="space-y-3">
-            {files.map((f) => (
+            {uploadedFiles.map((file) => (
               <div
-                key={f.name}
+                key={`${file.name}-${file.lastModified}`}
                 className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-muted-foreground/30"
               >
-                {f.cad ? (
-                  <Wrench className="size-5 text-muted-foreground" />
-                ) : (
-                  <FileText className="size-5 text-muted-foreground" />
-                )}
-                <span className="text-base font-medium">{f.name}</span>
-                <span className="text-sm text-muted-foreground">{f.size}</span>
-                <Badge variant={f.cad ? "success" : "neutral"}>{f.badge}</Badge>
+                <FileText className="size-5 text-muted-foreground" />
+                <span className="text-base font-medium">{file.name}</span>
+                <span className="text-sm text-muted-foreground">{(file.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 0 })} KB</span>
+                <Badge variant="neutral">{file.name.split(".").pop()?.toUpperCase()}</Badge>
                 <div className="ml-auto flex items-center gap-1">
-                  <Button variant="ghost" size="sm">
-                    View
+                  <Button type="button" variant="ghost" size="sm" onClick={() => openFile(file)}>
+                    <Eye className="size-4" /> View
                   </Button>
-                  <Button variant="ghost" size="sm">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setUploadedFiles((current) => current.filter((item) => item !== file))}>
                     <X className="size-4" /> Remove
                   </Button>
                 </div>
               </div>
             ))}
+            {!uploadedFiles.length && <p className="text-sm text-muted-foreground">No files selected yet.</p>}
+            {error && <p className="text-sm font-medium text-destructive">{error}</p>}
           </div>
         </CardContent>
       </Card>
@@ -144,14 +189,33 @@ export function SectionInput({ onRun }: { onRun: () => void }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gemini">Gemini 2.5 Pro</SelectItem>
-                  <SelectItem value="opus">Claude Opus 4.8</SelectItem>
-                  <SelectItem value="grok">Grok 4.20</SelectItem>
+                  <SelectItem value="gemini">Gemini 3.6 Flash</SelectItem>
+                  <SelectItem value="anthropic">Claude Sonnet 4.6</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <Button size="lg" onClick={onRun}>
-              RUN Extraction <ArrowRight className="size-4" />
+            <Button size="lg" disabled={isExtracting} onClick={async () => {
+              setError(null);
+              setIsExtracting(true);
+              try {
+                const formData = new FormData();
+                uploadedFiles.forEach((file) => formData.append("files", file));
+                if (emailText.trim()) formData.append("emailText", emailText.trim());
+                const apiUrl = (import.meta.env.VITE_EXTRACTION_API_URL || "https://quote-craft-pilot.onrender.com").replace(/\/$/, "");
+                const response = await fetch(`${apiUrl}/api/extract`, {
+                  method: "POST",
+                  body: formData,
+                });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.message || "Extraction failed.");
+                onRun(payload.extraction);
+              } catch (requestError) {
+                setError(requestError instanceof TypeError ? "Unable to connect to the extraction service. Please try again or contact support." : requestError instanceof Error ? requestError.message : "Extraction failed.");
+              } finally {
+                setIsExtracting(false);
+              }
+            }}>
+              {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
             </Button>
           </div>
         </CardContent>

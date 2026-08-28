@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { TopNav } from "@/components/qp/TopNav";
 import { RfqHeader } from "@/components/qp/RfqHeader";
-import { SectionInput } from "@/components/qp/SectionInput";
+import { SectionInput, type ExtractionResult } from "@/components/qp/SectionInput";
 import { SectionExtraction } from "@/components/qp/SectionExtraction";
 import { SectionOdoo } from "@/components/qp/SectionOdoo";
 import { TreeMenu, type NavigationTarget } from "@/components/qp/TreeMenu";
@@ -31,6 +31,7 @@ export const Route = createFileRoute("/")({
 
 function QuotePilot() {
   const [step, setStep] = useState(1);
+  const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [focusedSection, setFocusedSection] = useState<string>("summary");
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
@@ -94,7 +95,8 @@ function QuotePilot() {
 
             {step === 0 ? (
               <SectionInput
-                onRun={() => {
+                onRun={(result) => {
+                  setExtraction(result);
                   setStep(1);
                   setFocusedSection("summary");
                 }}
@@ -113,6 +115,7 @@ function QuotePilot() {
                 }}
                 focusedSection={focusedSection}
                 onSelectSection={(sec) => setFocusedSection(sec)}
+                extraction={extraction}
               />
             ) : null}
 
@@ -122,6 +125,7 @@ function QuotePilot() {
                   setStep(1);
                   setFocusedSection("summary");
                 }}
+                extraction={extraction}
               />
             ) : null}
           </div>

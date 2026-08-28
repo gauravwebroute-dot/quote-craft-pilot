@@ -66,11 +66,15 @@ appropriate HTTP status (400 for bad input, 500/503 for upstream issues).
 ## Testing it with the two drawings we already have
 
 ```bash
-curl -X POST http://localhost:4000/api/extract \
-  -F "files=@117_0018_001_C_OP__2_.pdf" \
-  -F "files=@117_0019_001_C_OP__2_.pdf" \
+curl.exe -X POST http://localhost:4000/api/extract \
+  -F "files=@backend/117_0018_001_C_OP__2_.pdf" \
+  -F "files=@backend/117_0019_001_C_OP__2_.pdf" \
   -F "emailText=Request for quote to apply CARC powder coating to two riveted assemblies per drawings 117-0018-001 and 117-0019-001."
 ```
+
+On Windows PowerShell, use `curl.exe` rather than `curl`; `curl` is commonly
+an alias for PowerShell's `Invoke-WebRequest`, which does not support curl's
+`-F` multipart form syntax.
 
 **Important — set expectations before testing**: both of these are
 *assembly* drawings with an isometric 3D view and no dimension callouts
@@ -120,6 +124,23 @@ fabricated number.
 `src/config/rateCard.js` — that's the one file with your shop's actual
 $/sq-in, labor rate, and overhead numbers. `pricingEngine.js` itself
 shouldn't need to change.
+
+### `POST /api/odoo/cross-check`
+
+Checks whether the customer and part already have a matching record. Without
+Odoo credentials, the endpoint uses built-in dummy records so the workflow can
+be tested safely. For example, `ABC Metal Works` with email
+`john@abcmetalworks.com` and part `117-0018-001` returns an existing customer
+and previous unit price of `$105.32`; a new part returns no previous quote.
+
+Live Odoo checks require all of `ODOO_URL`, `ODOO_DB`, `ODOO_USERNAME`, and
+`ODOO_API_KEY`. `ODOO_DB` cannot be omitted for Odoo JSON-RPC authentication;
+keep using dummy mode until the database name is available.
+
+The root `render.yaml` configures the backend service with automatic deploys
+from the GitHub `main` branch. Enable **Auto-Deploy: Yes** on the existing
+Render service, or create the service from the Blueprint once, then future
+pushes deploy automatically.
 
 ## What's next (not built yet)
 

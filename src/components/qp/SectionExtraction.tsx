@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { Field, KV, SubSection } from "./bits";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import type { ExtractionResult } from "./SectionInput";
 
 const summaryRows = [
   {
@@ -590,11 +591,13 @@ export function SectionExtraction({
   onContinue,
   focusedSection,
   onSelectSection,
+  extraction,
 }: {
   onBack: () => void;
   onContinue: () => void;
   focusedSection?: string;
   onSelectSection?: (section: string) => void;
+  extraction?: ExtractionResult | null;
 }) {
   const [customerOpen, setCustomerOpen] = useState(true);
   const [activePartId, setActivePartId] = useState<string>("part-1");
@@ -635,7 +638,7 @@ export function SectionExtraction({
             Review each part&apos;s coating specs, pricing, and notes before Odoo cross-check.
           </p>
           <p className="mt-1.5 text-xs font-medium text-muted-foreground">
-            Extracted with Gemini 2.5 Pro · 47 fields · 3 flagged for review
+            Extracted with Gemini 3.6 Flash · 47 fields · 3 flagged for review
           </p>
         </div>
 
@@ -683,6 +686,59 @@ export function SectionExtraction({
         </AlertDescription>
       </Alert>
 
+      {extraction ? (
+        <Card className="border-primary/30 shadow-2xs">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Live Extraction Result</CardTitle>
+            <p className="text-sm text-muted-foreground">This data came from the files and email submitted in Input Form.</p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {Object.entries(extraction.customer).map(([label, value]) => (
+                <div key={label} className="rounded-md border border-border bg-surface p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label.replace(/[A-Z]/g, (letter) => ` ${letter}`)}</p>
+                  <p className="mt-1 text-sm font-medium">{value || "Not provided"}</p>
+                </div>
+              ))}
+            </div>
+            <Separator />
+            <div className="space-y-3">
+              <h2 className="text-base font-semibold">Extracted Parts ({extraction.parts.length})</h2>
+              {extraction.parts.map((part, index) => (
+                <div key={`${String(part.partNumber)}-${index}`} className="rounded-md border border-border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold">{String(part.partNumber || "Part")}</p>
+                      <p className="text-sm text-muted-foreground">{String(part.partName || "Name not provided")}</p>
+                    </div>
+                    <Badge variant={part.areaConfidence === "LOW" ? "warning" : "success"}>
+                      Area: {String(part.areaConfidence || "UNKNOWN")}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                    <span><strong>Revision:</strong> {String(part.revision || "Not provided")}</span>
+                    <span><strong>Quantity:</strong> {String(part.quantity ?? "Not provided")}</span>
+                    <span><strong>Material:</strong> {String(part.material || "Not provided")}</span>
+                    <span><strong>Coating area:</strong> {String(part.coatingAreaSqIn ?? "Not provided")} sq in</span>
+                    <span><strong>Masking area:</strong> {String(part.maskingAreaSqIn ?? "Not provided")} sq in</span>
+                    <span><strong>Source:</strong> {String(part.sourceDrawingFile || "Not provided")}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {extraction.extractionNotes.length > 0 && (
+              <div className="rounded-md border border-warning/30 bg-surface-warning p-4">
+                <h2 className="text-base font-semibold">Notes & Warnings</h2>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                  {extraction.extractionNotes.map((note) => <li key={note}>{note}</li>)}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!extraction ? <>
       {/* 1. CUSTOMER INFORMATION - only shown when explicitly selected */}
       {focusedSection === "customer" && (
         <Card
@@ -1250,6 +1306,7 @@ export function SectionExtraction({
           </CardContent>
         </Card>
       )}
+      </> : null}
 
       {/* Navigation Buttons */}
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2">

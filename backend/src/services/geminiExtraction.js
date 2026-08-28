@@ -18,6 +18,11 @@ Rules:
 - If multiple parts/drawings are provided, return one entry per part in the "parts" array.`;
 
 const responseSchema = toGeminiSchema(EXTRACTION_TOOL.input_schema);
+const MAX_TRANSIENT_RETRIES = 2;
+
+function isTransientProviderError(error) {
+  return error?.status === 429 || error?.status === 503;
+}
 
 /**
  * Same signature/return shape as claudeExtraction.js's extractFromFiles,
@@ -31,7 +36,7 @@ export async function extractFromFiles(files, emailText) {
   }
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
     systemInstruction: SYSTEM_PROMPT,
     generationConfig: {
       responseMimeType: "application/json",
@@ -47,7 +52,17 @@ export async function extractFromFiles(files, emailText) {
   }
   parts.push({ text: "Extract all customer and part data from the above as JSON matching the schema." });
 
-  const result = await model.generateContent(parts);
+  let result;
+  for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt += 1) {
+    try {
+      result = await model.generateContent(parts);
+      break;
+    } catch (error) {
+      if (!isTransientProviderError(error) || attempt === MAX_TRANSIENT_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
+  }
+
   const text = result.response.text();
 
   try {
