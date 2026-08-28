@@ -766,7 +766,7 @@ export function SectionExtraction({
       {!extraction ? (
         <>
           {/* 1. CUSTOMER INFORMATION - only shown when explicitly selected */}
-          {focusedSection === "customer" && (
+          {(focusedSection === "customer" || focusedSection === "overview") && (
             <Card
               id="section-customer"
               className={`scroll-mt-28 transition-all duration-300 shadow-2xs border-primary ring-2 ring-primary/30`}
@@ -809,7 +809,7 @@ export function SectionExtraction({
           )}
 
           {/* 2. PART SUMMARY - only shown when explicitly selected */}
-          {focusedSection === "summary" && (
+          {(focusedSection === "summary" || focusedSection === "overview") && (
             <Card
               id="section-summary"
               className={`scroll-mt-28 overflow-hidden border transition-all duration-300 shadow-2xs border-primary ring-2 ring-primary/30`}
@@ -977,35 +977,12 @@ export function SectionExtraction({
               className={`scroll-mt-28 transition-all duration-300 shadow-2xs border-primary ring-2 ring-primary/30`}
             >
               <CardHeader className="pb-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-xl font-semibold">Part Details</CardTitle>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Showing the selected part only — switch parts below or from Part Summary.
-                    </p>
-                  </div>
-
-                  {/* Quick Part Switcher */}
-                  <div className="flex flex-wrap gap-1.5 bg-muted/60 p-1 rounded-lg">
-                    {summaryRows.map((r) => (
-                      <Button
-                        key={r.id}
-                        variant={activePartId === r.id ? "default" : "ghost"}
-                        size="sm"
-                        className="h-8 text-xs font-semibold"
-                        onClick={() => {
-                          setActivePartId(r.id);
-                          onSelectSection?.(r.id);
-                          const el = document.getElementById(`section-${r.id}`);
-                          if (el) {
-                            el.scrollIntoView({ behavior: "smooth", block: "start" });
-                          }
-                        }}
-                      >
-                        {r.num}. {r.partNumber}
-                      </Button>
-                    ))}
-                  </div>
+                <div>
+                  <CardTitle className="text-xl font-semibold">Part Details</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Showing the selected part only — switch parts from the left menu or Part
+                    Summary.
+                  </p>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">

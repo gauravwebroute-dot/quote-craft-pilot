@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils";
 
 export type NavigationTarget = {
   step: number;
-  section?: "customer" | "summary" | "part-1" | "part-2" | "part-3" | "part-4" | "part-5";
+  section?:
+    "overview" | "customer" | "summary" | "part-1" | "part-2" | "part-3" | "part-4" | "part-5";
 };
 
 interface TreeMenuProps {
@@ -112,7 +113,7 @@ export function TreeMenu({
             </button>
             <button
               type="button"
-              onClick={() => onNavigate({ step: 1, section: "summary" })}
+              onClick={() => onNavigate({ step: 1, section: "overview" })}
               className="flex flex-1 items-center gap-2 py-2 pr-2.5 text-left text-sm font-medium"
             >
               <Layers className="size-4 shrink-0" />

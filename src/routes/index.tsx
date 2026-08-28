@@ -32,7 +32,7 @@ export const Route = createFileRoute("/")({
 function QuotePilot() {
   const [step, setStep] = useState(1);
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
-  const [focusedSection, setFocusedSection] = useState<string>("summary");
+  const [focusedSection, setFocusedSection] = useState<string>("overview");
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
   // Quote number: QP<year>-0001. NOTE - the "0001" here is a placeholder.
@@ -98,7 +98,7 @@ function QuotePilot() {
                 onRun={(result) => {
                   setExtraction(result);
                   setStep(1);
-                  setFocusedSection("summary");
+                  setFocusedSection("overview");
                 }}
               />
             ) : null}
@@ -107,11 +107,11 @@ function QuotePilot() {
               <SectionExtraction
                 onBack={() => {
                   setStep(0);
-                  setFocusedSection("summary");
+                  setFocusedSection("overview");
                 }}
                 onContinue={() => {
                   setStep(2);
-                  setFocusedSection("summary");
+                  setFocusedSection("overview");
                 }}
                 focusedSection={focusedSection}
                 onSelectSection={(sec) => setFocusedSection(sec)}
@@ -123,7 +123,7 @@ function QuotePilot() {
               <SectionOdoo
                 onBack={() => {
                   setStep(1);
-                  setFocusedSection("summary");
+                  setFocusedSection("overview");
                 }}
                 extraction={extraction}
               />
