@@ -19,7 +19,8 @@ export function RfqHeader() {
             key={k}
             className="rounded-full border border-border bg-surface px-3 py-1.5 text-base text-muted-foreground"
           >
-            <span className="font-semibold text-foreground">{k}</span> {v}
+            <span className="text-muted-foreground">{k}</span>{" "}
+            <span className="font-semibold text-foreground">{v}</span>
           </span>
         ))}
       </div>

@@ -52,7 +52,7 @@ function QuotePilot() {
     <div className="min-h-screen bg-background font-sans text-foreground">
       <TopNav />
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <main className="mx-auto max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
         {/* Mobile / Quick Sidebar Toggle */}
         <div className="mb-4 flex items-center justify-between lg:hidden">
           <Button
@@ -76,10 +76,10 @@ function QuotePilot() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
-          {/* Nested Tree Menu Sidebar */}
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          {/* Nested Tree Menu Sidebar - fixed width so extra screen width goes to content, not the menu */}
           {sidebarVisible && (
-            <aside className="lg:col-span-3 lg:sticky lg:top-36 space-y-4">
+            <aside className="lg:sticky lg:top-36 lg:w-72 lg:shrink-0 space-y-4">
               <TreeMenu
                 currentStep={step}
                 currentSection={focusedSection}
@@ -89,8 +89,8 @@ function QuotePilot() {
             </aside>
           )}
 
-          {/* Main Workspace / Section Content */}
-          <div className={sidebarVisible ? "lg:col-span-9 space-y-6" : "lg:col-span-12 space-y-6"}>
+          {/* Main Workspace / Section Content - min-w-0 lets the table's own overflow-x-auto work instead of the flex item refusing to shrink/scroll */}
+          <div className="min-w-0 flex-1 space-y-6">
             <RfqHeader />
 
             {step === 0 ? (

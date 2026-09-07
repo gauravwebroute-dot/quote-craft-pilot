@@ -630,45 +630,14 @@ export function SectionExtraction({
 
   return (
     <div className="space-y-6">
-      {/* Header with Title and AI Badge */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Extraction Results</h1>
-          <p className="mt-1 text-base text-muted-foreground">
-            Review each part&apos;s coating specs, pricing, and notes before Odoo cross-check.
-          </p>
-          <p className="mt-1.5 text-xs font-medium text-muted-foreground">
-            Extracted with Gemini 3.6 Flash · 47 fields · 3 flagged for review
-          </p>
-        </div>
-
-        {/* Section View Switcher / Quick Jump Navigation Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-muted/60 p-1 rounded-lg text-xs">
-          <Button
-            variant={focusedSection === "customer" ? "default" : "ghost"}
-            size="sm"
-            className="h-7 px-2.5 text-xs font-medium"
-            onClick={() => onSelectSection?.("customer")}
-          >
-            Customer Info
-          </Button>
-          <Button
-            variant={focusedSection === "summary" ? "default" : "ghost"}
-            size="sm"
-            className="h-7 px-2.5 text-xs font-medium"
-            onClick={() => onSelectSection?.("summary")}
-          >
-            Part Summary
-          </Button>
-          <Button
-            variant={focusedSection?.startsWith("part-") ? "default" : "ghost"}
-            size="sm"
-            className="h-7 px-2.5 text-xs font-medium"
-            onClick={() => onSelectSection?.("part-1")}
-          >
-            Part Details
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Extraction Results</h1>
+        <p className="mt-1 text-base text-muted-foreground">
+          Review each part&apos;s coating specs, pricing, and notes before Odoo cross-check.
+        </p>
+        <p className="mt-1.5 text-xs font-medium text-muted-foreground">
+          Extracted with Gemini 3.6 Flash · 47 fields · 3 flagged for review
+        </p>
       </div>
 
       <Alert className="border-success/30 bg-surface-success shadow-2xs">
