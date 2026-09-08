@@ -63,6 +63,38 @@ Response `200`:
 Error responses use `{ "error": "SOME_CODE", "message": "..." }` with an
 appropriate HTTP status (400 for bad input, 500/503 for upstream issues).
 
+## Dimension extraction + surface-area calculation
+
+The extraction model no longer computes surface area itself. Instead, it reports raw
+dimension data in each part's `dimensions` field (see `src/lib/schema.js`), and
+`src/services/areaCalculator.js` - plain deterministic code, not AI - turns that into
+`totalSurfaceAreaSqIn` + a confidence level. Splitting it this way exists because LLMs
+are unreliable at multi-step geometric math; a wrong-but-confident number from an AI is
+worse than an honest "can't compute this."
+
+Three ways `dimensions.source` can come back:
+- **`EXPLICIT_CALLOUT`** - numbers are literally printed on the drawing → confidence `HIGH`.
+- **`FLAT_PATTERN_VIEW`** - a separate unfolded/development view with its own dimensions is
+  present (common for folded sheet metal) → confidence `MEDIUM`. (Note: computing area FROM
+  a flat-pattern view isn't wired up yet - see below.)
+- **`VISUAL_ESTIMATE_FROM_REFERENCE`** - no dimensions are written anywhere, but a known-size
+  object visible in the image (e.g. a rivet whose diameter IS stated in the drawing's BOM)
+  lets the model estimate overall proportions by comparing pixel sizes → confidence `LOW`,
+  and the reference object used is always named in `referenceObjectUsed`. **This is always a
+  rough estimate, never a measurement** - communicate that honestly to anyone using the price
+  that comes from it.
+
+**Important, honest limit**: none of the above computes an area for `shapeType:
+"complex_folded"` parts (brackets, riveted multi-panel assemblies - i.e. most real
+sheet-metal parts, including both sample drawings in this repo) unless a flat-pattern view
+is present AND wired up (not built yet). A folded part's true surface area isn't its
+overall bounding-box dimensions - unfolding changes the number - so the system refuses to
+guess rather than silently under- or over-counting. For these parts, `totalSurfaceAreaSqIn`
+stays `null` and `extractionNotes` explains why, exactly like it already did before this
+change. This will stay true even with a visible reference object, since a reference object
+only helps estimate overall size, not how much a folded/bent shape's true surface differs
+from its bounding box.
+
 ## Testing it with the two drawings we already have
 
 ```bash

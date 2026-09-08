@@ -7,13 +7,32 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const SYSTEM_PROMPT = `You are extracting structured data for a powder-coating quote system (QuotePilot).
 You will be given either an RFQ email/PDF, an engineering drawing (PDF), or a photo of a part.
 
-Rules:
-- Only extract what is EXPLICITLY present in the document. Never invent a dimension, area, material,
-  or spec that isn't stated or clearly computable from stated dimensions.
-- If a surface area must be computed, only do so when the drawing gives enough explicit dimensions
-  to compute it geometrically, and mark areaConfidence "HIGH". If you are estimating from a 3D
-  isometric view with no dimension callouts, still give your best estimate but mark it "LOW" and
-  say so in extractionNotes - never silently guess.
+DIMENSION EXTRACTION - report raw numbers in the "dimensions" field. Do NOT calculate
+surface area yourself; a separate deterministic step does that from what you report here.
+- If the drawing has explicit dimension callouts (numbers with units printed on the page),
+  read those exactly. Set dimensions.source to "EXPLICIT_CALLOUT".
+- If the drawing has a separate flat-pattern/development view with its own dimensions
+  (common for folded sheet metal), use those and set source to "FLAT_PATTERN_VIEW".
+- If there are NO dimensions written anywhere, but the drawing's parts list/BOM states an
+  exact size for some visible hardware (a rivet diameter, bolt size, standard hole size,
+  etc.), you may estimate the part's overall proportions by visually comparing that
+  reference object's size in the image against the rest of the part. Set source to
+  "VISUAL_ESTIMATE_FROM_REFERENCE" and name the reference object plus its known size in
+  referenceObjectUsed. This is always a rough estimate - never present it as precise.
+- If none of the above apply, set source to "NONE" and leave the numeric fields null.
+- Classify shapeType: "flat_plate" for a single flat sheet (with or without holes),
+  "cylindrical" for a round tube/rod, "complex_folded" for anything with multiple
+  bent/joined faces (brackets, riveted multi-panel assemblies - this is most real-world
+  sheet-metal parts). Do NOT treat overall bounding-box dimensions as if they were
+  flat-pattern area for a complex_folded part - that undercounts folded/bent area badly.
+  Just report what you can see or read, and let shapeType tell the downstream calculation
+  that this needs a flat-pattern view or 3D model instead of a bounding-box estimate.
+- Leave totalSurfaceAreaSqIn and areaConfidence as null, always - these are computed for
+  you afterward from the dimensions field, not by you.
+
+Other rules:
+- Only extract what is EXPLICITLY present in the document, or legitimately estimable per
+  the dimension rules above. Never invent a material, spec, or measurement.
 - If a field is genuinely not present in the document, return null for it.
 - If multiple parts/drawings are provided, return one entry per part in the "parts" array.`;
 

@@ -53,16 +53,56 @@ export const EXTRACTION_TOOL = {
             prepType: { type: ["string", "null"], description: "Surface prep method called out, e.g. 'Media blasting'." },
             hasScale: { type: ["boolean", "null"], description: "Whether mill scale / existing scale is present and needs removal. Null if not addressed." },
             quantity: { type: ["number", "null"] },
+            dimensions: {
+              type: "object",
+              description:
+                "Raw dimension data read or estimated from the drawing/photo. A SEPARATE deterministic calculation (not you) turns this into surface area - your job here is only to report the underlying numbers accurately, never to do area math yourself.",
+              properties: {
+                source: {
+                  type: ["string", "null"],
+                  enum: ["EXPLICIT_CALLOUT", "FLAT_PATTERN_VIEW", "VISUAL_ESTIMATE_FROM_REFERENCE", "NONE", null],
+                  description:
+                    "EXPLICIT_CALLOUT: dimensions are literally written on the drawing. FLAT_PATTERN_VIEW: a separate unfolded/flat-pattern view with its own dimensions is present (needed for folded sheet metal). VISUAL_ESTIMATE_FROM_REFERENCE: no dimensions are written anywhere, but a known-size reference object visible in the image (e.g. a rivet/bolt/hole whose exact size IS stated in the drawing's BOM/parts list table) lets you estimate overall proportions by comparing pixel sizes in the image against that reference. NONE: no dimensions and no usable reference object at all.",
+                },
+                referenceObjectUsed: {
+                  type: ["string", "null"],
+                  description: "Only when source is VISUAL_ESTIMATE_FROM_REFERENCE: name the reference object and its known size, e.g. '3/16in diameter blind rivet, BOM item 1'. Null otherwise.",
+                },
+                shapeType: {
+                  type: ["string", "null"],
+                  enum: ["flat_plate", "cylindrical", "complex_folded", "unknown", null],
+                  description:
+                    "flat_plate: a single flat sheet, possibly with holes. cylindrical: round tube/rod/pipe. complex_folded: multiple bent/joined faces (brackets, riveted multi-panel assemblies) - true surface area needs a flat-pattern view or 3D model; do NOT estimate this from overall bounding-box dimensions alone, that undercounts folded/bent area badly.",
+                },
+                overallLengthIn: { type: ["number", "null"] },
+                overallWidthIn: { type: ["number", "null"] },
+                overallHeightIn: { type: ["number", "null"], description: "For cylindrical parts, this is the length along the axis." },
+                diameterIn: { type: ["number", "null"], description: "For cylindrical/round parts only." },
+                holes: {
+                  type: "array",
+                  description: "Cutouts/holes to subtract from a flat plate's area, only if their size is stated or reliably estimable (e.g. matches a BOM-specified fastener size).",
+                  items: {
+                    type: "object",
+                    properties: {
+                      diameterIn: { type: "number" },
+                      count: { type: "number" },
+                    },
+                    required: ["diameterIn", "count"],
+                  },
+                },
+              },
+              required: ["source", "referenceObjectUsed", "shapeType", "overallLengthIn", "overallWidthIn", "overallHeightIn", "diameterIn", "holes"],
+            },
             totalSurfaceAreaSqIn: {
               type: ["number", "null"],
-              description: "Total surface area of the part in square inches, ALL sides/edges, if computable from given dimensions. Null if drawing has no dimensions to compute from (e.g. isometric-only assembly drawing with no dimension callouts).",
+              description: "Leave this null. It is computed deterministically from the `dimensions` field above by a separate calculation, not by you - do not fill it in yourself.",
             },
             coatingAreaSqIn: { type: ["number", "null"], description: "Surface area that actually receives coating (may be less than total if some faces are masked)." },
             maskingAreaSqIn: { type: ["number", "null"] },
             areaConfidence: {
               type: ["string", "null"],
               enum: ["HIGH", "MEDIUM", "LOW", null],
-              description: "HIGH if area was computed from explicit dimensions on the drawing. LOW if estimated/inferred from a 3D isometric view with no dimension callouts. Never fabricate a HIGH-confidence number from a picture alone.",
+              description: "Leave this null. It is computed deterministically alongside totalSurfaceAreaSqIn - do not fill it in yourself.",
             },
             coatingBom: {
               type: "object",
@@ -84,7 +124,7 @@ export const EXTRACTION_TOOL = {
           required: [
             "partNumber", "partName", "revision", "isAssembly", "existingCoating",
             "material", "partMark", "partMarkSpec", "prepType", "hasScale",
-            "quantity", "totalSurfaceAreaSqIn", "coatingAreaSqIn", "maskingAreaSqIn",
+            "quantity", "dimensions", "totalSurfaceAreaSqIn", "coatingAreaSqIn", "maskingAreaSqIn",
             "areaConfidence", "coatingBom", "sourceDrawingFile",
           ],
         },

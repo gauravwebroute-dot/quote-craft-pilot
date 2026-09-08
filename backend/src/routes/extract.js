@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { extractFromFiles } from "../services/extractionProvider.js";
+import { calculateSurfaceArea } from "../services/areaCalculator.js";
 
 const router = Router();
 
@@ -43,6 +44,38 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
     }));
 
     const extraction = await extractFromFiles(files, emailText || undefined);
+
+    // Surface area is never trusted from the AI's own math - it's
+    // recomputed here, deterministically, from the raw dimensions/
+    // reference-object data the AI reported. See areaCalculator.js for
+    // the confidence policy (HIGH/MEDIUM/LOW) this assigns.
+    if (Array.isArray(extraction?.parts)) {
+      extraction.parts = extraction.parts.map((part) => {
+        const result = calculateSurfaceArea(part.dimensions);
+        if (result.computed) {
+          return {
+            ...part,
+            totalSurfaceAreaSqIn: result.areaSqIn,
+            areaConfidence: result.confidence,
+            extractionNotes: undefined, // per-part notes aren't a field; method goes into the shared list below
+            _areaMethod: result.method,
+          };
+        }
+        return { ...part, totalSurfaceAreaSqIn: null, areaConfidence: null, _areaReason: result.reason };
+      });
+
+      const areaNotes = extraction.parts
+        .map((p) =>
+          p._areaMethod
+            ? `${p.partNumber ?? "Part"}: area computed - ${p._areaMethod}`
+            : p._areaReason
+              ? `${p.partNumber ?? "Part"}: area not computed - ${p._areaReason}`
+              : null,
+        )
+        .filter(Boolean);
+      extraction.extractionNotes = [...(extraction.extractionNotes ?? []), ...areaNotes];
+      extraction.parts = extraction.parts.map(({ _areaMethod, _areaReason, ...rest }) => rest);
+    }
 
     return res.status(200).json({ extraction });
   } catch (err) {
