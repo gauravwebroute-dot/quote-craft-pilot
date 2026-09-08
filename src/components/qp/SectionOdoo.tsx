@@ -2,86 +2,64 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { AlertTriangle, ArrowLeft, ArrowRight, Info, RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { AlertTriangle, ArrowLeft, CheckCircle2, PlusCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 
-function CompareRow({
-  label,
-  value,
-  status,
-  tone,
-  children,
-}: {
-  label: string;
-  value: string;
-  status: string;
-  tone: "success" | "warning";
-  children?: ReactNode;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 border-b border-border/60 py-3 transition-colors hover:bg-surface">
-      <span className="w-24 text-sm text-muted-foreground">{label}</span>
-      <span className="text-base">{value}</span>
-      <Badge variant={tone} className="ml-auto">
-        {status}
-        {tone === "warning" ? <AlertTriangle className="ml-1 size-3.5" /> : null}
-      </Badge>
-      {children ? <div className="w-full">{children}</div> : null}
-    </div>
-  );
-}
-
-const partRows = [
-  {
-    n: "1",
-    part: "Pa4-354/35",
-    exists: true,
-    rev: "C00",
-    prevRev: "B12",
-    name: "Rivet Panel Holder",
-    price: "$300.24",
-    prevPrice: "$256.27",
-  },
-  {
-    n: "2",
-    part: "DSC4577524",
-    exists: false,
-    rev: "A00",
-    name: "Wheel Bearing Insert",
-    price: "$25.24",
-  },
-  {
-    n: "3",
-    part: "ABCsdf456456",
-    exists: true,
-    rev: "D10",
-    prevRev: "B32",
-    name: "Lamp Shade Panel With Multi-Colors",
-    price: "$120.24",
-    prevPrice: "$200.27",
-  },
-];
+type PartCrossCheck = {
+  partNumber: string | null;
+  revision: string | null;
+  sourceFile: string | null;
+  reason: "NEW_CUSTOMER" | "EXISTING_QUOTE_FOUND" | "NO_PRIOR_QUOTE_FOR_THIS_PART";
+  previousQuote: { pricePerUnit?: number; quotedAt?: string; saleOrderName?: string } | null;
+  computedPrice: {
+    pricePerUnit?: number;
+    totalLineItem?: number;
+    priced?: boolean;
+    reason?: string;
+  };
+};
 
 type CrossCheckResult = {
   mode: string;
   message: string;
-  customer?: { matched?: boolean } | null;
-  parts: Array<{
-    partNumber?: string;
-    previousQuote?: { pricePerUnit?: number; quotedAt?: string } | null;
-  }>;
+  customer?: { matched?: boolean; record?: { name?: string } | null } | null;
+  parts: PartCrossCheck[];
 };
+
+type CreateResult = {
+  mode: string;
+  message: string;
+  created: { saleOrderName?: string | null; lineCount?: number } | null;
+  skipped: Array<{ partNumber: string | null }>;
+};
+
+const REASON_LABEL: Record<PartCrossCheck["reason"], string> = {
+  NEW_CUSTOMER: "New Customer",
+  EXISTING_QUOTE_FOUND: "Existing Quote Found",
+  NO_PRIOR_QUOTE_FOR_THIS_PART: "No Prior Quote for This Part",
+};
+
+function apiUrl() {
+  return (
+    import.meta.env["VITE_EXTRACTION_API_URL"] || "https://quote-craft-pilot.onrender.com"
+  ).replace(/\/$/, "");
+}
+
+function money(n?: number) {
+  return typeof n === "number" ? `$${n.toFixed(2)}` : "—";
+}
 
 export function SectionOdoo({
   onBack,
@@ -94,6 +72,11 @@ export function SectionOdoo({
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [creatingPart, setCreatingPart] = useState<string | null>(null);
+  const [createResults, setCreateResults] = useState<
+    Record<string, CreateResult | { error: string }>
+  >({});
+
   const runCrossCheck = async () => {
     if (!extraction) {
       setError("Run extraction before starting the Odoo cross-check.");
@@ -102,10 +85,7 @@ export function SectionOdoo({
     setIsChecking(true);
     setError(null);
     try {
-      const apiUrl = (
-        import.meta.env["VITE_EXTRACTION_API_URL"] || "https://quote-craft-pilot.onrender.com"
-      ).replace(/\/$/, "");
-      const response = await fetch(`${apiUrl}/api/odoo/cross-check`, {
+      const response = await fetch(`${apiUrl()}/api/odoo/cross-check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customer: extraction.customer, parts: extraction.parts }),
@@ -126,12 +106,45 @@ export function SectionOdoo({
     }
   };
 
+  // Only called after the user explicitly clicks "Allow" in the confirm
+  // dialog below. Sends confirm:true - the backend independently
+  // re-verifies this part isn't a duplicate before writing anything.
+  const confirmAddToOdoo = async (part: PartCrossCheck) => {
+    if (!extraction || !part.partNumber) return;
+    setCreatingPart(part.partNumber);
+    try {
+      const original = extraction.parts.find((p) => p.partNumber === part.partNumber);
+      const response = await fetch(`${apiUrl()}/api/odoo/create-quotation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer: extraction.customer,
+          parts: original ? [original] : [],
+          confirm: true,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "Failed to add to Odoo.");
+      setCreateResults((prev) => ({ ...prev, [part.partNumber as string]: payload }));
+    } catch (requestError) {
+      setCreateResults((prev) => ({
+        ...prev,
+        [part.partNumber as string]: {
+          error: requestError instanceof Error ? requestError.message : "Failed to add to Odoo.",
+        },
+      }));
+    } finally {
+      setCreatingPart(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Odoo Cross-Check</h1>
         <p className="mt-1 text-base text-muted-foreground">
-          Cross-check with existing Odoo database before exporting the quote.
+          Cross-check with existing Odoo data before adding anything new. Reading from Odoo never
+          changes it — nothing gets written unless you explicitly confirm it, part by part.
         </p>
       </div>
 
@@ -163,185 +176,110 @@ export function SectionOdoo({
                 {crossCheck.customer?.matched ? "Existing customer" : "New customer"}
               </Badge>
             </div>
-            <div className="space-y-2">
-              {crossCheck.parts.map((part, index) => (
-                <div
-                  key={`${part.partNumber}-${index}`}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
-                >
-                  <span className="font-medium">{part.partNumber || "Unknown part"}</span>
-                  {part.previousQuote ? (
-                    <span className="text-sm">
-                      Previous price:{" "}
-                      <strong>${part.previousQuote.pricePerUnit?.toFixed(2)}</strong> (
-                      {part.previousQuote.quotedAt})
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">No previous quote found</span>
-                  )}
-                </div>
-              ))}
+
+            <div className="space-y-3">
+              {crossCheck.parts.map((part, index) => {
+                const key = part.partNumber ?? `part-${index}`;
+                const createResult = part.partNumber ? createResults[part.partNumber] : undefined;
+                const alreadyCreated =
+                  createResult && "created" in createResult && createResult.created;
+                const canAddToOdoo = part.reason !== "EXISTING_QUOTE_FOUND";
+
+                return (
+                  <div key={key} className="rounded-md border border-border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span className="font-medium">{part.partNumber || "Unknown part"}</span>
+                      <Badge
+                        variant={part.reason === "EXISTING_QUOTE_FOUND" ? "success" : "warning"}
+                      >
+                        {REASON_LABEL[part.reason]}
+                      </Badge>
+                    </div>
+
+                    <div className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
+                      <span className="text-muted-foreground">
+                        Old price:{" "}
+                        {part.previousQuote ? (
+                          <strong className="text-foreground">
+                            {money(part.previousQuote.pricePerUnit)}
+                          </strong>
+                        ) : (
+                          "none on file"
+                        )}
+                      </span>
+                      <span className="text-muted-foreground">
+                        Computed price now:{" "}
+                        <strong className="text-foreground">
+                          {part.computedPrice?.priced === false
+                            ? "not enough data"
+                            : money(part.computedPrice?.pricePerUnit)}
+                        </strong>
+                      </span>
+                    </div>
+
+                    {canAddToOdoo && !alreadyCreated ? (
+                      <div className="mt-3">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={creatingPart === part.partNumber}
+                            >
+                              <PlusCircle className="size-3.5" />
+                              {creatingPart === part.partNumber ? "Adding..." : "Add to Odoo"}
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Add this quote to Odoo?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will create a new quotation in your live Odoo instance for{" "}
+                                <strong>{part.partNumber}</strong> at{" "}
+                                <strong>{money(part.computedPrice?.pricePerUnit)}</strong>/unit.
+                                {crossCheck.customer?.matched
+                                  ? " The existing customer record will be used as-is."
+                                  : " A new customer record will also be created."}{" "}
+                                No existing Odoo record will ever be modified or deleted by this
+                                action.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Deny</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => confirmAddToOdoo(part)}>
+                                Allow
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    ) : null}
+
+                    {alreadyCreated ? (
+                      <Alert className="mt-3 border-success/30 bg-surface-success">
+                        <CheckCircle2 className="size-4 text-success" />
+                        <AlertDescription className="text-foreground">
+                          Added to Odoo as quotation{" "}
+                          <strong>
+                            {"created" in createResult && createResult.created?.saleOrderName}
+                          </strong>
+                          .
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+
+                    {createResult && "error" in createResult ? (
+                      <Alert variant="destructive" className="mt-3">
+                        <AlertDescription>{createResult.error}</AlertDescription>
+                      </Alert>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
       ) : null}
-
-      <Card className="transition-colors hover:border-muted-foreground/30">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold">Client Info Cross-Check</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="partial">
-            <TabsList className="w-full">
-              <TabsTrigger value="partial">Scenario 1: Partial Match</TabsTrigger>
-              <TabsTrigger value="none">Scenario 2: No Match Found</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="partial" className="mt-4 space-y-4">
-              <Alert className="border-warning/30 bg-surface-warning">
-                <AlertTriangle className="size-4 text-warning" />
-                <AlertDescription className="text-foreground">
-                  Customer partially matches an existing Odoo record. Review discrepancies below.
-                </AlertDescription>
-              </Alert>
-              <div>
-                <CompareRow label="Email" value="john@email.com" status="Existing" tone="success" />
-                <CompareRow
-                  label="Company"
-                  value="ABC Metal Works - S9"
-                  status="Existing"
-                  tone="success"
-                />
-                <CompareRow label="Contact" value="James Smith" status="Existing" tone="success" />
-                <CompareRow label="Phone" value="714-555-1212" status="Not found" tone="warning" />
-                <CompareRow
-                  label="Address"
-                  value="123 Main St, Los Angeles, CA 90024"
-                  status="Not found"
-                  tone="warning"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button>Update Odoo Contact Info</Button>
-                <Button variant="ghost">Export without updating</Button>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="none" className="mt-4 space-y-4">
-              <Alert className="border-warning/30 bg-surface-warning">
-                <AlertTriangle className="size-4 text-warning" />
-                <AlertDescription className="text-foreground">
-                  No matching customer found in Odoo. Please review before creating new.
-                </AlertDescription>
-              </Alert>
-              <div>
-                <CompareRow
-                  label="Email"
-                  value="john@email.com"
-                  status="Not found"
-                  tone="warning"
-                />
-                <CompareRow
-                  label="Company"
-                  value="ABC Metal Works Inc"
-                  status="Not found"
-                  tone="warning"
-                >
-                  <p className="pt-1 text-sm text-muted-foreground">
-                    Possible matches in Odoo: ABC Metal Works | ABC Metal Works - S9{" "}
-                    <a href="#" className="text-primary underline-offset-4 hover:underline">
-                      Choose match
-                    </a>
-                  </p>
-                </CompareRow>
-                <CompareRow label="Contact" value="John Smith" status="Not found" tone="warning" />
-                <CompareRow label="Phone" value="714-555-1212" status="Not found" tone="warning" />
-                <CompareRow
-                  label="Address"
-                  value="Not listed"
-                  status="Not to be exported"
-                  tone="warning"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button>+ Add New Contact</Button>
-                <Button variant="ghost">Re-Run Cross-Check</Button>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-
-      <Card className="transition-colors hover:border-muted-foreground/30">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold">Part Management</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">#</TableHead>
-                  <TableHead>Part #</TableHead>
-                  <TableHead>Existing in Odoo?</TableHead>
-                  <TableHead>Revision</TableHead>
-                  <TableHead>Name / Description</TableHead>
-                  <TableHead className="text-right">Price / unit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {partRows.map((r) => (
-                  <TableRow key={r.part}>
-                    <TableCell className="text-muted-foreground">{r.n}</TableCell>
-                    <TableCell className="font-medium">{r.part}</TableCell>
-                    <TableCell>
-                      {r.exists ? (
-                        <Badge variant="success">YES</Badge>
-                      ) : (
-                        <Badge variant="warning">NO — Add New</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div>Current: {r.rev}</div>
-                      {r.prevRev ? (
-                        <div className="text-sm text-muted-foreground">Previous: {r.prevRev}</div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>{r.name}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="tabular-nums">{r.price} (Current)</div>
-                      {r.prevPrice ? (
-                        <div className="text-sm tabular-nums text-muted-foreground">
-                          {r.prevPrice} (Previous)
-                        </div>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <Alert>
-            <Info className="size-4" />
-            <AlertDescription>
-              If Company and Email are &quot;Existing&quot;, this application can export to Odoo.
-              Otherwise the Export button is disabled.
-            </AlertDescription>
-          </Alert>
-        </CardContent>
-      </Card>
-
-      <Card className="transition-colors hover:border-muted-foreground/30">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold">Ready to Export</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-3 py-4">
-          <Button size="lg">
-            Export to Odoo Quotation <ArrowRight className="size-4" />
-          </Button>
-          <Button variant="ghost">Save as Draft (Don&apos;t Export)</Button>
-        </CardContent>
-      </Card>
 
       <div className="flex">
         <Button variant="ghost" onClick={onBack}>

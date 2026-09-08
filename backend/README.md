@@ -142,6 +142,28 @@ from the GitHub `main` branch. Enable **Auto-Deploy: Yes** on the existing
 Render service, or create the service from the Blueprint once, then future
 pushes deploy automatically.
 
+### `POST /api/odoo/cross-check`
+
+Read-only. Takes `{ customer, parts }` and returns, per part, one of three
+reasons - `NEW_CUSTOMER`, `EXISTING_QUOTE_FOUND`, or
+`NO_PRIOR_QUOTE_FOR_THIS_PART` - plus the old price if one was found AND a
+freshly computed price from the pricing engine, side by side.
+
+### `POST /api/odoo/create-quotation`
+
+**Writes to Odoo.** Takes `{ customer, parts, confirm: true }`. Safety
+rules, enforced in code (see the comment block at the top of
+`odooCreateQuotation.js`):
+- `confirm` must be the literal boolean `true` or the request is rejected
+  before any Odoo call happens.
+- The duplicate check is re-run server-side on every call - a part that
+  already has a prior quote in Odoo is always skipped, never recreated,
+  even if the caller thinks it's new.
+- This file only ever calls Odoo's `create` - never `write` or `unlink`.
+  It can add new records; it can never modify or delete an existing one.
+- Every create is logged server-side (customer, order name, part numbers,
+  timestamp) for an audit trail.
+
 ## What's next (not built yet)
 
 1. ~~Pricing engine~~ ✅ built — see `POST /api/price` above.
