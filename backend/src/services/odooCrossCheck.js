@@ -7,7 +7,17 @@ import { DEFAULT_RATE_CARD } from "../config/rateCard.js";
  * odooCreateQuotation.js, a SEPARATE file) `create`. Keeping duplicate-check
  * strictly read-only means running it can never damage existing Odoo data,
  * no matter how many times or how it's called.
+ *
+ * TEST-PHASE SAFETY: while we're validating the RFQ -> Odoo pipeline, ALL
+ * live reads and writes are scoped to a single company - "MAD Custom-
+ * Coating" - never Maverick or OC. This is enforced here in code (see
+ * resolveTestCompanyId + the JS-side company filter below), not left as a
+ * "please remember to only test on MAD" convention - a convention can be
+ * forgotten, a filter in code can't.
  */
+
+export const TEST_COMPANY_NAME = "MAD Custom-Coating";
+export const TEST_TAG_NAME = "+temp test";
 
 const DUMMY_CUSTOMERS = [
   {
@@ -68,8 +78,9 @@ function findDummyCustomer(customer) {
 
 async function crossCheckLiveOdoo({ customer, parts }) {
   const uid = await odooAuth();
+  const companyId = await resolveTestCompanyId(uid);
 
-  const partner = await findLivePartner(uid, customer);
+  const partner = await findLivePartner(uid, customer, companyId);
 
   const results = [];
   for (const part of parts) {
@@ -83,6 +94,7 @@ async function crossCheckLiveOdoo({ customer, parts }) {
         "search_read",
         [[
           ["order_id.partner_id", "=", partner.id],
+          ["order_id.company_id", "=", companyId],
           ["order_id.state", "!=", "cancel"],
           ["name", "ilike", part.partNumber],
         ]],
@@ -103,15 +115,68 @@ async function crossCheckLiveOdoo({ customer, parts }) {
 
   return {
     mode: "live",
+    company: { id: companyId, name: TEST_COMPANY_NAME },
     customer: { matched: Boolean(partner), record: partner, candidates: partner ? [partner] : [] },
     parts: results,
     message: partner
-      ? "Live customer + prior-quote lookup completed."
-      : "No matching customer found in Odoo - this would be a new customer.",
+      ? `Live customer + prior-quote lookup completed, scoped to "${TEST_COMPANY_NAME}" only.`
+      : `No matching customer found under "${TEST_COMPANY_NAME}" in Odoo - this would be a new customer.`,
   };
 }
 
-async function findLivePartner(uid, customer) {
+/**
+ * Looks up the Odoo `res.company` record id for our test-phase company by
+ * name. Throws (rather than falling back to "no company filter") if it
+ * isn't found, so a typo'd company name fails loudly instead of silently
+ * reading/writing against every company.
+ */
+async function resolveTestCompanyId(uid) {
+  const companies = await odooCall("object", "execute_kw", [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_API_KEY,
+    "res.company",
+    "search_read",
+    [[["name", "=", TEST_COMPANY_NAME]]],
+    { fields: ["id"], limit: 1 },
+  ]);
+  if (companies.length === 0) {
+    throw new Error(
+      `Test company "${TEST_COMPANY_NAME}" was not found in Odoo. Check the exact spelling of the company name.`,
+    );
+  }
+  return companies[0].id;
+}
+
+/**
+ * Finds (never creates) the Odoo tag used to mark everything from this
+ * test phase, so it can be filtered/bulk-deleted later. If it doesn't
+ * exist yet, creates it once - this is a `create` on crm.tag only, never
+ * touching any existing tag.
+ */
+async function resolveTestTagId(uid) {
+  const tags = await odooCall("object", "execute_kw", [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_API_KEY,
+    "crm.tag",
+    "search_read",
+    [[["name", "=", TEST_TAG_NAME]]],
+    { fields: ["id"], limit: 1 },
+  ]);
+  if (tags.length > 0) return tags[0].id;
+
+  return odooCall("object", "execute_kw", [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_API_KEY,
+    "crm.tag",
+    "create",
+    [{ name: TEST_TAG_NAME }],
+  ]);
+}
+
+async function findLivePartner(uid, customer, companyId) {
   const domain = [];
   if (customer.email) domain.push(["email", "=", customer.email]);
   if (customer.company) domain.push(["name", "ilike", customer.company]);
@@ -124,9 +189,15 @@ async function findLivePartner(uid, customer) {
     "res.partner",
     "search_read",
     [domain.length > 1 ? ["|", ...domain] : domain],
-    { fields: ["id", "name", "email", "phone"], limit: 5 },
+    { fields: ["id", "name", "email", "phone", "company_id"], limit: 20 },
   ]);
-  return partners[0] ?? null;
+
+  // Filtered here in plain JS (not in the Odoo domain) so this stays easy
+  // to read and can't silently match a Maverick/OC-only contact just
+  // because writing a correct nested OR/AND Odoo domain is easy to get
+  // subtly wrong. A contact with no company_id set (shared across
+  // companies) is allowed too - only an explicit OTHER company excludes it.
+  return partners.find((p) => !p.company_id || p.company_id[0] === companyId) ?? null;
 }
 
 /**
@@ -181,4 +252,4 @@ async function odooCall(service, method, args) {
   return payload.result;
 }
 
-export { odooAuth, odooCall, isLiveConfigured };
+export { odooAuth, odooCall, isLiveConfigured, resolveTestCompanyId, resolveTestTagId };

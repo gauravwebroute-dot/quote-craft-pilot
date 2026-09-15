@@ -95,6 +95,31 @@ change. This will stay true even with a visible reference object, since a refere
 only helps estimate overall size, not how much a folded/bent shape's true surface differs
 from its bounding box.
 
+## Test-phase scoping: MAD Custom-Coating only
+
+While the RFQ → Odoo pipeline is being validated, every live read and write is forced to
+a single Odoo company - **"MAD Custom-Coating"** - never Maverick or OC. This is enforced
+in code (`resolveTestCompanyId` in `odooCrossCheck.js`), not left as a convention to
+remember: if that company name isn't found in Odoo, cross-check/create fail loudly rather
+than silently reading/writing across every company.
+
+Every quotation created also gets tagged **"+temp test"** (Odoo `crm.tag`, found or
+created automatically), and each order line's description follows the exact format:
+
+```
+<part name> -- <total square inches> si +temp test
+```
+
+e.g. `Base Riveted Assy, Whip Antenna Mount, Menace-X -- 142.5 si +temp test`. If the
+surface area couldn't be computed (see the dimension-extraction section above - most
+complex/folded parts without a flat-pattern view), it reads `-- area unknown si +temp
+test` instead of a fabricated number.
+
+Both the company scoping and the tag are hardcoded constants (`TEST_COMPANY_NAME`,
+`TEST_TAG_NAME` in `odooCrossCheck.js`) - not accepted as caller input - specifically so
+nothing this code creates can end up anywhere other than the test company while this is
+being validated.
+
 ## Testing it with the two drawings we already have
 
 ```bash
