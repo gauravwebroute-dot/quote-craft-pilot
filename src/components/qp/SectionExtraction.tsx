@@ -635,9 +635,13 @@ export function SectionExtraction({
         <p className="mt-1 text-base text-muted-foreground">
           Review each part&apos;s coating specs, pricing, and notes before Odoo cross-check.
         </p>
-        <p className="mt-1.5 text-xs font-medium text-muted-foreground">
-          Extracted with Gemini 3.6 Flash · 47 fields · 3 flagged for review
-        </p>
+        {extraction ? (
+          <p className="mt-1.5 text-xs font-medium text-muted-foreground">
+            Extracted {extraction.parts.length} part{extraction.parts.length === 1 ? "" : "s"} ·{" "}
+            {extraction.extractionNotes.length} note
+            {extraction.extractionNotes.length === 1 ? "" : "s"} flagged for review
+          </p>
+        ) : null}
       </div>
 
       <Alert className="border-success/30 bg-surface-success shadow-2xs">

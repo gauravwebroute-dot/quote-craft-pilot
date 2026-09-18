@@ -55,7 +55,7 @@ export async function extractFromFiles(files, emailText) {
   }
 
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
     systemInstruction: SYSTEM_PROMPT,
     generationConfig: {
       responseMimeType: "application/json",

@@ -33,6 +33,17 @@ export type ExtractionPart = {
   prepType: string | null;
   hasScale: boolean | null;
   quantity: number | null;
+  dimensions: {
+    source:
+      "EXPLICIT_CALLOUT" | "FLAT_PATTERN_VIEW" | "VISUAL_ESTIMATE_FROM_REFERENCE" | "NONE" | null;
+    referenceObjectUsed: string | null;
+    shapeType: "flat_plate" | "cylindrical" | "complex_folded" | "unknown" | null;
+    overallLengthIn: number | null;
+    overallWidthIn: number | null;
+    overallHeightIn: number | null;
+    diameterIn: number | null;
+    holes: Array<{ diameterIn: number; count: number }>;
+  } | null;
   totalSurfaceAreaSqIn: number | null;
   coatingAreaSqIn: number | null;
   maskingAreaSqIn: number | null;
@@ -206,13 +217,14 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
           </div>
           <div className="space-y-2">
             <Label>Business Unit</Label>
-            <Select defaultValue="maverick">
+            <Select defaultValue="mad">
               <SelectTrigger className="w-full sm:w-80">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="maverick">Maverick Powder Coating</SelectItem>
                 <SelectItem value="oc">OC Custom Coating</SelectItem>
+                <SelectItem value="mad">MAD Custom-Coating</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -232,7 +244,7 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gemini">Gemini 3.6 Flash</SelectItem>
+                  <SelectItem value="gemini">Gemini 3.5 Flash</SelectItem>
                   <SelectItem value="anthropic">Claude Sonnet 4.6</SelectItem>
                 </SelectContent>
               </Select>
