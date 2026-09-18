@@ -1,0 +1,136 @@
+import { EXTRACTION_TOOL } from "../lib/schema.js";
+
+const SYSTEM_PROMPT = `You are extracting structured data for a powder-coating quote system (QuotePilot).
+You will be given either an RFQ email/PDF, an engineering drawing (PDF), or a photo of a part.
+
+Rules:
+- Only extract what is EXPLICITLY present in the document. Never invent a dimension, area, material,
+  or spec that isn't stated or clearly computable from stated dimensions.
+- If a surface area must be computed, only do so when the drawing gives enough explicit dimensions
+  to compute it geometrically, and mark areaConfidence "HIGH". If you are estimating from a 3D
+  isometric view with no dimension callouts, still give your best estimate but mark it "LOW" and
+  say so in extractionNotes - never silently guess.
+- If a field is genuinely not present in the document, return null for it. Do not write "N/A",
+  "Unknown", or empty string - use null so the frontend's own "Unknown" badge logic can handle it.
+- If multiple parts/drawings are provided, return one entry per part in the "parts" array.
+- Always call the record_extraction tool with your findings or return a JSON object matching the schema.`;
+
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/**
+ * Extract RFQ data using OpenRouter.
+ * @param {Array<{ base64: string, mediaType: string, filename: string }>} files
+ * @param {string} [emailText]
+ * @param {string} [modelName]
+ * @returns {Promise<object>} parsed extraction matching EXTRACTION_TOOL.input_schema
+ */
+export async function extractFromFiles(files, emailText, modelName) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is missing in environment variables.");
+  }
+
+  const model = modelName || process.env.DEFAULT_EXTRACTION_MODEL || "google/gemini-2.0-flash-001";
+
+  if (!files?.length && !emailText) {
+    throw new Error("At least one file or emailText must be provided");
+  }
+
+  const userContent = [];
+
+  if (emailText) {
+    userContent.push({ type: "text", text: `RFQ email text:\n\n${emailText}` });
+  }
+
+  for (const file of files) {
+    userContent.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${file.mediaType};base64,${file.base64}`,
+      },
+    });
+    userContent.push({ type: "text", text: `(filename: ${file.filename})` });
+  }
+
+  userContent.push({
+    type: "text",
+    text: "Extract all customer and part data from the above using the record_extraction tool or as JSON matching the schema.",
+  });
+
+  const tools = [
+    {
+      type: "function",
+      function: {
+        name: EXTRACTION_TOOL.name,
+        description: EXTRACTION_TOOL.description,
+        parameters: EXTRACTION_TOOL.input_schema,
+      },
+    },
+  ];
+
+  const payload = {
+    model,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userContent },
+    ],
+    tools,
+    tool_choice: { type: "function", function: { name: "record_extraction" } },
+  };
+
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://quotepilot.app",
+      "X-Title": "QuotePilot RFQ Extraction",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let errorJson;
+    try {
+      errorJson = JSON.parse(errorText);
+    } catch {
+      // not JSON
+    }
+    const message = errorJson?.error?.message || errorText || `OpenRouter request failed with status ${response.status}`;
+    const err = new Error(`OpenRouter API error (${response.status}): ${message}`);
+    err.status = response.status;
+    throw err;
+  }
+
+  const result = await response.json();
+  const choice = result.choices?.[0];
+
+  // 1. Check for tool call
+  const toolCall = choice?.message?.tool_calls?.find(
+    (tc) => tc.function?.name === "record_extraction" || tc.type === "function"
+  ) || choice?.message?.tool_calls?.[0];
+
+  if (toolCall?.function?.arguments) {
+    try {
+      return typeof toolCall.function.arguments === "string"
+        ? JSON.parse(toolCall.function.arguments)
+        : toolCall.function.arguments;
+    } catch {
+      throw new Error(`Failed to parse tool arguments as JSON: ${toolCall.function.arguments}`);
+    }
+  }
+
+  // 2. Fallback: check choice.message.content if the model returned raw JSON
+  if (choice?.message?.content) {
+    const content = choice.message.content.trim();
+    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      throw new Error(`Model did not return tool_calls and content was not valid JSON: ${content.slice(0, 200)}`);
+    }
+  }
+
+  throw new Error("No tool_calls or content found in OpenRouter response");
+}

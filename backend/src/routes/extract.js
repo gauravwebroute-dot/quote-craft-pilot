@@ -29,6 +29,7 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
   try {
     const uploadedFiles = req.files ?? [];
     const emailText = typeof req.body?.emailText === "string" ? req.body.emailText.trim() : "";
+    const model = typeof req.body?.model === "string" ? req.body.model.trim() : undefined;
 
     if (uploadedFiles.length === 0 && !emailText) {
       return res.status(400).json({
@@ -43,7 +44,7 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
       filename: f.originalname,
     }));
 
-    const extraction = await extractFromFiles(files, emailText || undefined);
+    const extraction = await extractFromFiles(files, emailText || undefined, model);
 
     // Surface area is never trusted from the AI's own math - it's
     // recomputed here, deterministically, from the raw dimensions/

@@ -63,6 +63,7 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [emailText, setEmailText] = useState(emailBody);
+  const [selectedModel, setSelectedModel] = useState("google/gemini-2.0-flash-001");
   const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -239,13 +240,27 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="space-y-2">
               <Label>AI Model</Label>
-              <Select defaultValue="gemini">
-                <SelectTrigger className="w-full sm:w-72">
-                  <SelectValue />
+              <Select value={selectedModel} onValueChange={setSelectedModel}>
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue placeholder="Select model" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gemini">Gemini 3.5 Flash</SelectItem>
-                  <SelectItem value="anthropic">Claude Sonnet 4.6</SelectItem>
+                  <SelectItem value="google/gemini-2.0-flash-001">
+                    <span className="font-medium">Gemini 2.0 Flash</span>{" "}
+                    <span className="text-xs text-muted-foreground">(Default • Fast & Free)</span>
+                  </SelectItem>
+                  <SelectItem value="anthropic/claude-3.5-sonnet">
+                    <span className="font-medium">Claude 3.5 Sonnet</span>{" "}
+                    <span className="text-xs text-muted-foreground">(Precision Blueprints)</span>
+                  </SelectItem>
+                  <SelectItem value="meta-llama/llama-3.2-11b-vision-instruct">
+                    <span className="font-medium">Llama 3.2 Vision (Groq)</span>{" "}
+                    <span className="text-xs text-muted-foreground">(Ultra-fast)</span>
+                  </SelectItem>
+                  <SelectItem value="google/gemini-1.5-pro">
+                    <span className="font-medium">Gemini 1.5 Pro</span>{" "}
+                    <span className="text-xs text-muted-foreground">(Deep Reasoning)</span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -259,6 +274,7 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                   const formData = new FormData();
                   uploadedFiles.forEach((file) => formData.append("files", file));
                   if (emailText.trim()) formData.append("emailText", emailText.trim());
+                  formData.append("model", selectedModel);
                   const apiUrl = (
                     import.meta.env["VITE_EXTRACTION_API_URL"] ||
                     "https://quote-craft-pilot.onrender.com"
