@@ -53,7 +53,10 @@ const REASON_LABEL: Record<PartCrossCheck["reason"], string> = {
 
 function apiUrl() {
   return (
-    import.meta.env["VITE_EXTRACTION_API_URL"] || "https://quote-craft-pilot.onrender.com"
+    import.meta.env["VITE_EXTRACTION_API_URL"] ||
+    (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ? "http://localhost:4000"
+      : "https://quote-craft-pilot.onrender.com")
   ).replace(/\/$/, "");
 }
 

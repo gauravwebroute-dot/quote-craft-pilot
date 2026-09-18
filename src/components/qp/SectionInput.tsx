@@ -277,7 +277,9 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                   formData.append("model", selectedModel);
                   const apiUrl = (
                     import.meta.env["VITE_EXTRACTION_API_URL"] ||
-                    "https://quote-craft-pilot.onrender.com"
+                    (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+                      ? "http://localhost:4000"
+                      : "https://quote-craft-pilot.onrender.com")
                   ).replace(/\/$/, "");
                   const response = await fetch(`${apiUrl}/api/extract`, {
                     method: "POST",
