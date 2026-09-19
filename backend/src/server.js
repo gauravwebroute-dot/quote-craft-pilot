@@ -17,6 +17,10 @@ if (provider === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
   console.error("FATAL: ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in.");
   process.exit(1);
 }
+if (provider === "openrouter" && !process.env.OPENROUTER_API_KEY) {
+  console.error("FATAL: EXTRACTION_PROVIDER=openrouter but OPENROUTER_API_KEY is not set.");
+  process.exit(1);
+}
 
 const allowedOrigins = new Set(
   (process.env.CORS_ORIGIN || "")
