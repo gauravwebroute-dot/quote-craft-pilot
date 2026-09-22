@@ -30,7 +30,7 @@ export async function extractFromFiles(files, emailText, modelName) {
     throw new Error("OPENROUTER_API_KEY is missing in environment variables.");
   }
 
-  const model = modelName || process.env.DEFAULT_EXTRACTION_MODEL || "google/gemini-2.0-flash-001";
+  const model = modelName || process.env.DEFAULT_EXTRACTION_MODEL || "~google/gemini-flash-latest";
 
   if (!files?.length && !emailText) {
     throw new Error("At least one file or emailText must be provided");
