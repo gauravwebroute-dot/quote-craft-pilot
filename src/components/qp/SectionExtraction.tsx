@@ -700,6 +700,10 @@ export function SectionExtraction({
                     </Badge>
                   </div>
                   <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                    <span className="font-semibold">
+                      <strong>Total surface area:</strong>{" "}
+                      {part.totalSurfaceAreaSqIn ?? "Not available"} sq in
+                    </span>
                     <span>
                       <strong>Revision:</strong> {part.revision || "Not provided"}
                     </span>

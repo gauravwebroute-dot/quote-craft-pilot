@@ -13,22 +13,19 @@ surface area yourself; a separate deterministic step does that from what you rep
   read those exactly. Set dimensions.source to "EXPLICIT_CALLOUT".
 - If the drawing has a separate flat-pattern/development view with its own dimensions
   (common for folded sheet metal), use those and set source to "FLAT_PATTERN_VIEW".
-- If there are NO dimensions written anywhere, but the drawing's parts list/BOM states an
-  exact size for some visible hardware (a rivet diameter, bolt size, standard hole size,
-  etc.), you may estimate the part's overall proportions by visually comparing that
-  reference object's size in the image against the rest of the part. Set source to
-  "VISUAL_ESTIMATE_FROM_REFERENCE" and name the reference object plus its known size in
-  referenceObjectUsed. This is always a rough estimate - never present it as precise.
-- If none of the above apply, set source to "NONE" and leave the numeric fields null.
+- If there are NO dimensions written anywhere, you MUST still estimate overall length, width,
+  and height by using a drawing scale, known hardware/BOM size, title-block scale, or visible
+  proportions. Set source to "VISUAL_ESTIMATE_FROM_REFERENCE", name the cue in
+  referenceObjectUsed, and add a note that this is a rough estimate. Use source NONE only when
+  the PDF truly contains no usable visual, scale, hardware, or dimensional cue at all.
 - Classify shapeType: "flat_plate" for a single flat sheet (with or without holes),
   "cylindrical" for a round tube/rod, "complex_folded" for anything with multiple
   bent/joined faces (brackets, riveted multi-panel assemblies - this is most real-world
-  sheet-metal parts). Do NOT treat overall bounding-box dimensions as if they were
-  flat-pattern area for a complex_folded part - that undercounts folded/bent area badly.
-  Just report what you can see or read, and let shapeType tell the downstream calculation
-  that this needs a flat-pattern view or 3D model instead of a bounding-box estimate.
-- Leave totalSurfaceAreaSqIn and areaConfidence as null, always - these are computed for
-  you afterward from the dimensions field, not by you.
+  sheet-metal parts). For complex_folded parts, report the best overall bounding length, width,
+  and height available; the downstream calculator will produce a clearly labeled LOW-confidence
+  estimate.
+- Return totalSurfaceAreaSqIn when the PDF supports an estimate, and set areaConfidence to LOW
+  for visual, scale, bounding-box, or model-based estimates. Use null only with no usable cue.
 
 Other rules:
 - Only extract what is EXPLICITLY present in the document, or legitimately estimable per

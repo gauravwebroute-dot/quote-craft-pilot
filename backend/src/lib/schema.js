@@ -95,14 +95,14 @@ export const EXTRACTION_TOOL = {
             },
             totalSurfaceAreaSqIn: {
               type: ["number", "null"],
-              description: "Leave this null. It is computed deterministically from the `dimensions` field above by a separate calculation, not by you - do not fill it in yourself.",
+              description: "Return the best total exterior surface-area estimate in square inches when the drawing provides enough visual, scale, dimensional, or reference information. Use null only when the PDF provides no usable area cue at all. This may be a LOW-confidence estimate for folded parts.",
             },
             coatingAreaSqIn: { type: ["number", "null"], description: "Surface area that actually receives coating (may be less than total if some faces are masked)." },
             maskingAreaSqIn: { type: ["number", "null"] },
             areaConfidence: {
               type: ["string", "null"],
               enum: ["HIGH", "MEDIUM", "LOW", null],
-              description: "Leave this null. It is computed deterministically alongside totalSurfaceAreaSqIn - do not fill it in yourself.",
+              description: "Use HIGH for exact callout math, MEDIUM for a flat-pattern calculation, and LOW for any visual, scale, bounding-box, or model-based estimate.",
             },
             coatingBom: {
               type: "object",

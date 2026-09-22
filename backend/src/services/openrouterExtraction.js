@@ -6,10 +6,11 @@ You will be given either an RFQ email/PDF, an engineering drawing (PDF), or a ph
 Rules:
 - Only extract what is EXPLICITLY present in the document. Never invent a dimension, area, material,
   or spec that isn't stated or clearly computable from stated dimensions.
-- If a surface area must be computed, only do so when the drawing gives enough explicit dimensions
-  to compute it geometrically, and mark areaConfidence "HIGH". If you are estimating from a 3D
-  isometric view with no dimension callouts, still give your best estimate but mark it "LOW" and
-  say so in extractionNotes - never silently guess.
+- If explicit dimensions are available, extract every usable length, width, height, diameter,
+  hole size, and quantity exactly. If exact dimensions are not available, you MUST still provide
+  a best-effort estimate from any scale, known hardware/reference object, title-block scale, or
+  visible overall dimensions. Mark that source as VISUAL_ESTIMATE_FROM_REFERENCE and explain the
+  uncertainty in extractionNotes. Do not return source NONE when the PDF contains any usable cue.
 - If a field is genuinely not present in the document, return null for it. Do not write "N/A",
   "Unknown", or empty string - use null so the frontend's own "Unknown" badge logic can handle it.
 - If multiple parts/drawings are provided, return one entry per part in the "parts" array.
@@ -43,12 +44,22 @@ export async function extractFromFiles(files, emailText, modelName) {
   }
 
   for (const file of files) {
-    userContent.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${file.mediaType};base64,${file.base64}`,
-      },
-    });
+    if (file.mediaType === "application/pdf") {
+      userContent.push({
+        type: "file",
+        file: {
+          filename: file.filename,
+          file_data: `data:application/pdf;base64,${file.base64}`,
+        },
+      });
+    } else {
+      userContent.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${file.mediaType};base64,${file.base64}`,
+        },
+      });
+    }
     userContent.push({ type: "text", text: `(filename: ${file.filename})` });
   }
 

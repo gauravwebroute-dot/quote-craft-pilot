@@ -46,10 +46,8 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
 
     const extraction = await extractFromFiles(files, emailText || undefined, model);
 
-    // Surface area is never trusted from the AI's own math - it's
-    // recomputed here, deterministically, from the raw dimensions/
-    // reference-object data the AI reported. See areaCalculator.js for
-    // the confidence policy (HIGH/MEDIUM/LOW) this assigns.
+    // Prefer deterministic geometry, but preserve the model's explicitly
+    // labeled LOW-confidence estimate when structured dimensions are absent.
     if (Array.isArray(extraction?.parts)) {
       extraction.parts = extraction.parts.map((part) => {
         const result = calculateSurfaceArea(part.dimensions);
@@ -60,6 +58,13 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
             areaConfidence: result.confidence,
             extractionNotes: undefined, // per-part notes aren't a field; method goes into the shared list below
             _areaMethod: result.method,
+          };
+        }
+        if (typeof part.totalSurfaceAreaSqIn === "number" && part.totalSurfaceAreaSqIn > 0) {
+          return {
+            ...part,
+            areaConfidence: part.areaConfidence || "LOW",
+            _areaMethod: "Model-provided fallback estimate from the drawing; verify before quoting.",
           };
         }
         return { ...part, totalSurfaceAreaSqIn: null, areaConfidence: null, _areaReason: result.reason };

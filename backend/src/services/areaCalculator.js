@@ -18,9 +18,8 @@
  *            reference object in the image (no written measurements at
  *            all). This is a rough estimate, not a measurement, and is
  *            always labeled as such.
- *   null (not computed) - complex folded/multi-face part with no
- *            flat-pattern view, or literally nothing to go on. We refuse
- *            to guess rather than silently invent a wrong number.
+ *   LOW      - no flat pattern exists, so a bounding-box estimate is used for
+ *            a folded/multi-face part. It is labeled as an estimate.
  */
 
 /**
@@ -34,26 +33,35 @@ export function calculateSurfaceArea(dims) {
 
   if (dims.shapeType === "complex_folded") {
     if (dims.source === "FLAT_PATTERN_VIEW") {
-      // We have explicit flat-pattern numbers, but they'd need to be
-      // reported as overallLength/overallWidth of THAT unfolded view for
-      // this to be a simple rectangle calc - support this once we see a
-      // real example. For now, be explicit that we see the data exists
-      // but aren't computing from it yet, rather than guessing.
+      if (hasPositive(dims.overallLengthIn, dims.overallWidthIn)) {
+        return {
+          computed: true,
+          areaSqIn: round2(dims.overallLengthIn * dims.overallWidthIn),
+          confidence: "MEDIUM",
+          method: `Flat-pattern area (${dims.overallLengthIn}" × ${dims.overallWidthIn}").`,
+        };
+      }
+    }
+
+    if (hasPositive(dims.overallLengthIn, dims.overallWidthIn, dims.overallHeightIn)) {
+      const { overallLengthIn: length, overallWidthIn: width, overallHeightIn: height } = dims;
+      const area = 2 * (length * width + length * height + width * height);
       return {
-        computed: false,
-        reason:
-          "A flat-pattern/development view is present, but automated area calculation from it isn't built yet - needs manual takeoff for this part for now.",
+        computed: true,
+        areaSqIn: round2(area),
+        confidence: "LOW",
+        method: `Forced low-confidence folded-part estimate from bounding dimensions (${length}" × ${width}" × ${height}"); verify against flat pattern or CAD.`,
       };
     }
+
     return {
       computed: false,
-      reason:
-        "This is a folded/multi-face part (bracket, riveted assembly, etc.) with no flat-pattern view. Overall bounding dimensions can't give a true surface area for a folded shape - this needs either a flat-pattern view or a 3D model.",
+      reason: "No usable dimensions or reference scale were extracted, so an area estimate is unavailable.",
     };
   }
 
   if (dims.shapeType === "flat_plate") {
-    if (!dims.overallLengthIn || !dims.overallWidthIn) {
+    if (!hasPositive(dims.overallLengthIn, dims.overallWidthIn)) {
       return { computed: false, reason: "Flat plate shape detected, but length/width dimensions are missing." };
     }
     let area = dims.overallLengthIn * dims.overallWidthIn;
@@ -75,7 +83,7 @@ export function calculateSurfaceArea(dims) {
   }
 
   if (dims.shapeType === "cylindrical") {
-    if (!dims.diameterIn || !dims.overallHeightIn) {
+    if (!hasPositive(dims.diameterIn, dims.overallHeightIn)) {
       return { computed: false, reason: "Cylindrical shape detected, but diameter/length dimensions are missing." };
     }
     const area = Math.PI * dims.diameterIn * dims.overallHeightIn;
@@ -88,6 +96,10 @@ export function calculateSurfaceArea(dims) {
   }
 
   return { computed: false, reason: "Shape type could not be determined from the drawing/photo." };
+}
+
+function hasPositive(...values) {
+  return values.every((value) => typeof value === "number" && value > 0);
 }
 
 function confidenceFor(source) {

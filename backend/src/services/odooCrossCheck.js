@@ -241,7 +241,7 @@ async function odooAuth() {
 }
 
 async function odooCall(service, method, args) {
-  const response = await fetch(`${process.env.ODOO_URL.replace(/\/$/, "")}/jsonrpc`, {
+  const response = await fetch(`${normalizeOdooUrl(process.env.ODOO_URL)}/jsonrpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", method: "call", params: { service, method, args }, id: Date.now() }),
@@ -250,6 +250,19 @@ async function odooCall(service, method, args) {
   const payload = await response.json();
   if (payload.error) throw new Error(payload.error.data?.message || "Odoo request failed.");
   return payload.result;
+}
+
+function normalizeOdooUrl(value) {
+  const raw = String(value ?? "").trim();
+  const markdownMatch = raw.match(/\((https?:\/\/[^)]+)\)/i) || raw.match(/https?:\/\/\S+/i);
+  const url = (markdownMatch?.[1] ?? raw)
+    .replace(/[)>\]}`].*$/, "")
+    .replace(/\/jsonrpc\/?$/, "")
+    .replace(/\/$/, "");
+  if (!/^https?:\/\/[^\s/]+(?:\/[^\s]*)?$/i.test(url)) {
+    throw new Error("Invalid ODOO_URL. Set it to the base URL, for example https://yourcompany.odoo.com.");
+  }
+  return url;
 }
 
 export { odooAuth, odooCall, isLiveConfigured, resolveTestCompanyId, resolveTestTagId };
