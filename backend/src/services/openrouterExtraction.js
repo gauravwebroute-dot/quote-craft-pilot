@@ -87,6 +87,12 @@ export async function extractFromFiles(files, emailText, modelName) {
     ],
     tools,
     tool_choice: { type: "function", function: { name: "record_extraction" } },
+    plugins: [
+      {
+        id: "file-parser",
+        pdf: { engine: "cloudflare-ai" },
+      },
+    ],
   };
 
   const response = await fetch(OPENROUTER_API_URL, {
