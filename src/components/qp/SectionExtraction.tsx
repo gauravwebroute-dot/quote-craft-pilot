@@ -759,6 +759,7 @@ export function SectionExtraction({
 
       {extraction ? (
         <>
+          {(focusedSection === "customer" || focusedSection === "overview") && (
           <Card id="section-customer" className="scroll-mt-28 border-primary/30 shadow-2xs">
             <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
               <div className="flex items-center gap-2.5">
@@ -788,7 +789,9 @@ export function SectionExtraction({
               </CardContent>
             ) : null}
           </Card>
+          )}
 
+          {(focusedSection === "summary" || focusedSection === "overview") && (
           <Card id="section-summary" className="scroll-mt-28 overflow-hidden border-primary/30 shadow-2xs">
             <div className="flex items-center justify-between bg-[#1e3a5f] px-4 py-3 text-white sm:px-6">
               <h2 className="text-base font-bold tracking-wide sm:text-lg">PART SUMMARY</h2>
@@ -847,222 +850,14 @@ export function SectionExtraction({
               </div>
             </CardContent>
           </Card>
+          )}
 
-          {focusedSection?.startsWith("part-") ? (() => {
-            const selectedIndex = Number(focusedSection.slice("part-".length)) - 1;
-            const selectedPart = extraction.parts[selectedIndex];
-            const selectedPrice = pricing?.results[selectedIndex];
-            if (!selectedPart) return null;
-            return (
-              <Card id={`section-part-${selectedIndex + 1}`} className="scroll-mt-28 border-primary/30 shadow-2xs">
-                <CardHeader>
-                  <CardTitle className="text-xl font-semibold">
-                    {selectedPart.partNumber || `Part ${selectedIndex + 1}`} Details
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    {selectedPart.partSummary || selectedPart.partName || "No part summary provided."}
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <Field label="Part name" value={selectedPart.partName || "Not provided"} />
-                    <Field label="Revision" value={selectedPart.revision || "Not provided"} />
-                    <Field label="Material" value={selectedPart.material || "Not provided"} />
-                    <Field label="Quantity" value={selectedPart.quantity ?? "Not provided"} />
-                    <Field label="Total area" value={selectedPart.totalSurfaceAreaSqIn == null ? "Unknown" : `${selectedPart.totalSurfaceAreaSqIn} SI`} />
-                    <Field label="Coating area" value={selectedPart.coatingAreaSqIn == null ? "Unknown" : `${selectedPart.coatingAreaSqIn} SI`} />
-                    <Field label="Masking area" value={selectedPart.maskingAreaSqIn == null ? "Unknown" : `${selectedPart.maskingAreaSqIn} SI`} />
-                    <Field label="Holes" value={selectedPart.dimensions?.holes?.reduce((sum, hole) => sum + hole.count, 0) || 0} />
-                  </div>
-                  <SubSection title="Coating Details">
-                    <div className="grid gap-x-8 sm:grid-cols-2">
-                      {Object.entries(selectedPart.coatingBom || {}).map(([label, value]) => (
-                        <Field key={label} label={label} value={value || "Not provided"} />
-                      ))}
-                    </div>
-                  </SubSection>
-                  <SubSection title="Pricing Breakdown" tone="strong">
-                    {selectedPrice?.priced ? (
-                      <div className="space-y-2 text-sm">
-                        <KV label="Cerakote coating" value={formatMoney(selectedPrice.breakdown?.coating?.cost ?? 0)} keyBold />
-                        <KV label="Masking" value={formatMoney(selectedPrice.breakdown?.masking?.cost ?? 0)} keyBold />
-                        <KV label="Media blasting" value="Included ($0.00)" keyBold />
-                        <KV label="Calculated price / unit" value={formatMoney(selectedPrice.totals?.calculatedPrice ?? 0)} keyBold />
-                        <KV label="Final price / unit" value={formatMoney(selectedPrice.pricePerUnit ?? 0)} keyBold />
-                        {selectedPrice.totals?.minimumPriceApplied ? (
-                          <p className="pt-2 text-xs font-medium text-warning">$5.00 minimum per unit applied.</p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        {selectedPrice?.reason || "Pricing is pending until area and quantity are available."}
-                      </p>
-                    )}
-                  </SubSection>
-                </CardContent>
-              </Card>
-            );
-          })() : null}
         </>
       ) : null}
-
-      {extraction ? (
-        <Card className="border-primary/30 shadow-2xs">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Live Extraction Result</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              This data came from the files and email submitted in Input Form.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              {Object.entries(extraction.customer).map(([label, value]) => (
-                <div key={label} className="rounded-md border border-border bg-surface p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {label.replace(/[A-Z]/g, (letter) => ` ${letter}`)}
-                  </p>
-                  <p className="mt-1 text-sm font-medium">{value || "Not provided"}</p>
-                </div>
-              ))}
-            </div>
-            <Separator />
-            <div className="space-y-3">
-              <h2 className="text-base font-semibold">
-                Extracted Parts ({extraction.parts.length})
-              </h2>
-              {extraction.parts.map((part, index) => (
-                <div
-                  key={`${part.partNumber ?? "part"}-${index}`}
-                  className="rounded-md border border-border p-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-semibold">{part.partNumber || "Part"}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {part.partName || "Name not provided"}
-                      </p>
-                      <p className="mt-1 max-w-3xl text-sm text-foreground/80">
-                        {part.partSummary || "Part summary not provided"}
-                      </p>
-                    </div>
-                    <Badge variant={part.areaConfidence === "LOW" ? "warning" : "success"}>
-                      Area: {part.areaConfidence || "UNKNOWN"}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-                    <span className="font-semibold">
-                      <strong>Total surface area:</strong>{" "}
-                      {part.totalSurfaceAreaSqIn ?? "Not available"} sq in
-                    </span>
-                    <span>
-                      <strong>Revision:</strong> {part.revision || "Not provided"}
-                    </span>
-                    <span>
-                      <strong>Quantity:</strong> {part.quantity ?? "Not provided"}
-                    </span>
-                    <span>
-                      <strong>Material:</strong> {part.material || "Not provided"}
-                    </span>
-                    <span>
-                      <strong>Coating area:</strong> {part.coatingAreaSqIn ?? "Not provided"} sq in
-                    </span>
-                    <span>
-                      <strong>Holes:</strong>{" "}
-                      {part.dimensions?.holes?.reduce((sum, hole) => sum + hole.count, 0) || 0}
-                    </span>
-                    <span>
-                      <strong>Masking area:</strong> {part.maskingAreaSqIn ?? "Not provided"} sq in
-                    </span>
-                    <span>
-                      <strong>Source:</strong> {part.sourceDrawingFile || "Not provided"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {extraction.extractionNotes.length > 0 && (
-              <div className="rounded-md border border-warning/30 bg-surface-warning p-4">
-                <h2 className="text-base font-semibold">Notes & Warnings</h2>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                  {extraction.extractionNotes.map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <Card className="border-primary/20 shadow-2xs">
-              <CardHeader>
-                <CardTitle className="text-xl font-semibold">Pricing Summary</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Cerakote $0.40/SI, masking adds $0.06/SI when required, media blasting included,
-                  and every part has a $5.00 minimum per unit.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <label className="flex items-center gap-3 text-sm font-semibold">
-                  <input
-                    type="checkbox"
-                    checked={chemFilmRequested}
-                    onChange={(event) => setChemFilmRequested(event.target.checked)}
-                    className="size-4 accent-primary"
-                  />
-                  Add Chem Film ($0.03/SI, $200 minimum lot fee)
-                </label>
-                {pricingError ? (
-                  <p className="text-sm font-medium text-destructive">{pricingError}</p>
-                ) : pricing ? (
-                  <div className="space-y-3">
-                    <div className="overflow-x-auto rounded-md border border-border">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/60">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Part</th>
-                            <th className="px-3 py-2 text-right">Price / Unit</th>
-                            <th className="px-3 py-2 text-right">Quantity</th>
-                            <th className="px-3 py-2 text-right">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {pricing.results.map((result) => (
-                            <tr key={result.partNumber ?? result.quantity} className="border-t border-border/60">
-                              <td className="px-3 py-2 font-medium">{result.partNumber || "Part"}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">
-                                {result.priced ? formatMoney(result.pricePerUnit ?? 0) : "Not priced"}
-                              </td>
-                              <td className="px-3 py-2 text-right tabular-nums">{result.quantity}</td>
-                              <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                                {result.priced ? formatMoney(result.totalLineItem ?? 0) : "-"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="grid gap-2 text-sm sm:grid-cols-3">
-                      <span><strong>Cerakote + masking:</strong> $0.46/SI</span>
-                      <span><strong>Chem Film:</strong> {formatMoney(pricing.chemFilm.charge)}</span>
-                      <span className="font-bold sm:text-right"><strong>Quote total:</strong> {formatMoney(pricing.quoteTotal)}</span>
-                    </div>
-                    {chemFilmRequested ? (
-                      <p className="text-xs text-muted-foreground">
-                        Chem Film uses {pricing.chemFilm.totalAreaSqIn} total SI × $0.03 = {formatMoney(pricing.chemFilm.calculatedCharge)};
-                        the {formatMoney(pricing.chemFilm.minimumLotFee)} minimum lot fee applies when lower.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Calculating pricing...</p>
-                )}
-              </CardContent>
-            </Card>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {!extraction ? (
+      {focusedSection?.startsWith("part-") ? (
         <>
           {/* 1. CUSTOMER INFORMATION - only shown when explicitly selected */}
-          {(focusedSection === "customer" || focusedSection === "overview") && (
+          {!extraction && (focusedSection === "customer" || focusedSection === "overview") && (
             <Card
               id="section-customer"
               className={`scroll-mt-28 transition-all duration-300 shadow-2xs border-primary ring-2 ring-primary/30`}
@@ -1105,7 +900,7 @@ export function SectionExtraction({
           )}
 
           {/* 2. PART SUMMARY - only shown when explicitly selected */}
-          {(focusedSection === "summary" || focusedSection === "overview") && (
+          {!extraction && (focusedSection === "summary" || focusedSection === "overview") && (
             <Card
               id="section-summary"
               className={`scroll-mt-28 overflow-hidden border transition-all duration-300 shadow-2xs border-primary ring-2 ring-primary/30`}
@@ -1255,7 +1050,7 @@ export function SectionExtraction({
                           {summaryRows.reduce((acc, r) => acc + Number(r.qty), 0)} pcs
                         </td>
                         <td className="py-3.5 px-4 text-right font-black text-base sm:text-lg tabular-nums text-primary border-r border-slate-200 dark:border-border/60">
-                          $1,616.50
+                            {pricing ? formatMoney(pricing.quoteTotal) : pricingError ? "Unavailable" : "Pending"}
                         </td>
                         <td></td>
                       </tr>
