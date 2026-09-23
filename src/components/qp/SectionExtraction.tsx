@@ -203,7 +203,7 @@ function PricingGroup({
   cost,
 }: {
   title: string;
-  rows: Array<[string, string]>;
+  rows: Array<[string, string, string?]>;
   cost?: string;
 }) {
   return (
@@ -217,8 +217,14 @@ function PricingGroup({
         ) : null}
       </div>
       <div className="divide-y divide-border/40">
-        {rows.map(([k, v]) => (
-          <KV key={k} label={k} value={v} keyBold={true} />
+        {rows.map(([k, v, helper]) => (
+          <div key={k} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
+            <span className="font-semibold text-foreground">{k}</span>
+            <span className="text-right tabular-nums">
+              <span className="font-medium">{v}</span>
+              {helper ? <span className="block text-xs font-normal text-muted-foreground">{helper}</span> : null}
+            </span>
+          </div>
         ))}
       </div>
     </div>
@@ -245,12 +251,12 @@ interface PartDetailCardProps {
     unitPrice: string;
     calcTotal: string;
     maskingCost: string;
-    maskingRows: Array<[string, string]>;
+    maskingRows: Array<[string, string, string?]>;
     blastingCost: string;
-    blastingRows: Array<[string, string]>;
+    blastingRows: Array<[string, string, string?]>;
     coatingCost: string;
-    coatingRows: Array<[string, string]>;
-    partMarkRows: Array<[string, string]>;
+    coatingRows: Array<[string, string, string?]>;
+    partMarkRows: Array<[string, string, string?]>;
     totalLabor: string;
     totalMaterial: string;
     totalTime: string;
@@ -289,6 +295,15 @@ function PartDetailCard({
   isSelected,
 }: PartDetailCardProps) {
   const [activeTab, setActiveTab] = useState<string>("spec");
+  const totalArea = Number.parseFloat(area) || 10;
+  const maskedArea = Number.parseFloat(maskArea) || 0;
+  const quantity = Number.parseFloat(qty) || 1;
+  const maskingCost = totalArea * 0.06;
+  const coatingCost = totalArea * 0.4;
+  const directCost = maskingCost + coatingCost;
+  const pricePerUnitValue = Math.max(5, directCost);
+  const lineItemTotal = pricePerUnitValue * quantity;
+  const chemFilmCharge = Math.max(200, totalArea * quantity * 0.03);
 
   return (
     <div
@@ -473,23 +488,48 @@ function PartDetailCard({
                 <div className="grid gap-4 md:grid-cols-2">
                   <PricingGroup
                     title="Masking"
-                    cost={pricingData.maskingCost}
-                    rows={pricingData.maskingRows}
+                    cost={formatMoney(maskingCost)}
+                    rows={[
+                      ["Total Area", `${totalArea} SI`],
+                      ["Masked Area", `${maskedArea} SI`],
+                      ["Holes", "4 holes", "less than 1 in dia"],
+                      ["Cost", formatMoney(maskingCost), "+ $0.06 / SI of total area"],
+                    ]}
                   />
                   <PricingGroup
                     title="Media Blasting"
-                    cost={pricingData.blastingCost}
-                    rows={pricingData.blastingRows}
+                    cost="$0.00"
+                    rows={[
+                      ["Total Area", `${totalArea} SI`],
+                      ["Time", `${(totalArea * 0.03).toFixed(2)} min / unit`, "0.03 min / SI"],
+                    ]}
                   />
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <PricingGroup
-                    title="Coating Process"
-                    cost={pricingData.coatingCost}
-                    rows={pricingData.coatingRows}
+                    title="Cerakote Coating Process"
+                    cost={formatMoney(coatingCost)}
+                    rows={[
+                      ["Total Area", `${totalArea} SI`],
+                      ["Time", `${(totalArea * 0.03).toFixed(2)} min / unit`, "0.03 min / SI"],
+                      ["Cost", formatMoney(coatingCost), "$0.40 / SI"],
+                      ["Material", `${(totalArea * 0.0035).toFixed(2)} oz`, "0.0035 oz / SI"],
+                      ["Color Complexity", "TBD - Cerakote Camo Green FED-STD-595"],
+                      ["Oven Time", "TBD"],
+                    ]}
                   />
-                  <PricingGroup title="Part Mark & Extras" rows={pricingData.partMarkRows} />
+                  <PricingGroup
+                    title="Adjustments"
+                    rows={[
+                      ["Chem Film", "YES - 1 lot added to invoice", `$${chemFilmCharge.toFixed(2)} charge; $200 minimum lot fee`],
+                      ["Rush order", "$0.00", "+ 0.0% of cost"],
+                      ["Setup / Extra work", "+ $0.00", "+ 0.0% of cost"],
+                      ["Shipping", "+ $0.00", "+ 0%"],
+                      ["Discount", "- $0.00", "- 0%"],
+                      ["Overhead & Profit", "+ $0.00", "+ 0% of cost"],
+                    ]}
+                  />
                 </div>
 
                 <Separator />
@@ -499,18 +539,18 @@ function PartDetailCard({
                   <div className="flex flex-wrap items-baseline justify-between text-base font-bold">
                     <span className="text-foreground">Total Direct Part Cost:</span>
                     <span className="tabular-nums text-primary">
-                      {pricingData.partCost} per unit
+                      {formatMoney(directCost)} per unit
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
                     <span>
-                      <strong>Labor:</strong> {pricingData.totalLabor}
+                      <strong>Masking:</strong> {formatMoney(maskingCost)}
                     </span>
                     <span>
-                      <strong>Material:</strong> {pricingData.totalMaterial}
+                      <strong>Coating:</strong> {formatMoney(coatingCost)}
                     </span>
                     <span>
-                      <strong>Est Time:</strong> {pricingData.totalTime}
+                      <strong>Chem Film:</strong> {formatMoney(chemFilmCharge)} invoice adjustment
                     </span>
                   </div>
                 </div>
@@ -551,14 +591,14 @@ function PartDetailCard({
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-base font-semibold opacity-90">Price per Unit:</span>
                     <span className="text-2xl font-black tabular-nums">
-                      {pricingData.unitPrice}
+                      {formatMoney(pricePerUnitValue)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs opacity-80">{pricingData.ratePsi}</p>
+                  <p className="mt-1 text-xs opacity-80">$5.00 minimum price per unit</p>
                   <Separator className="my-3 bg-primary-foreground/25" />
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-base font-semibold">Total Line Item ({qty} Qty):</span>
-                    <span className="text-xl font-black tabular-nums">{pricingData.calcTotal}</span>
+                    <span className="text-xl font-black tabular-nums">{formatMoney(lineItemTotal)}</span>
                   </div>
                 </div>
               </div>
