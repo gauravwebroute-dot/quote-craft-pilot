@@ -695,6 +695,31 @@ export function SectionExtraction({
     return undefined;
   }, [focusedSection]);
 
+  const extractedSummaryRows = extraction
+    ? extraction.parts.map((part, index) => {
+        const pricedPart = pricing?.results[index];
+        const area = part.coatingAreaSqIn ?? part.totalSurfaceAreaSqIn;
+        const maskingRequired = (part.maskingAreaSqIn ?? 0) > 0;
+        const workType = part.coatingBom?.topcoat?.toLowerCase().includes("cerakote")
+          ? "Cerakote"
+          : "Coating";
+
+        return {
+          id: `extracted-part-${index}`,
+          num: String(index + 1),
+          partNumber: part.partNumber || "Not provided",
+          name: part.partName || "Name not provided",
+          summary: part.partSummary || "Part summary not provided",
+          workType,
+          area: area == null ? "Unknown" : `${area} sq in`,
+          pricePerSqIn: area == null ? "Unknown" : maskingRequired ? "$0.46" : "$0.40",
+          pricePerUnit: pricedPart?.priced ? formatMoney(pricedPart.pricePerUnit ?? 0) : "Pending",
+          qty: part.quantity ?? "Unknown",
+          total: pricedPart?.priced ? formatMoney(pricedPart.totalLineItem ?? 0) : "Pending",
+        };
+      })
+    : [];
+
   return (
     <div className="space-y-6">
       <div>
@@ -725,6 +750,99 @@ export function SectionExtraction({
           </a>
         </AlertDescription>
       </Alert>
+
+      {extraction ? (
+        <>
+          <Card id="section-customer" className="scroll-mt-28 border-primary/30 shadow-2xs">
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+              <div className="flex items-center gap-2.5">
+                <CardTitle className="text-xl font-semibold">Customer Information</CardTitle>
+                <Badge variant="outline" className="text-xs">
+                  Extracted from RFQ
+                </Badge>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={customerOpen ? "Collapse" : "Expand"}
+                onClick={() => setCustomerOpen((open) => !open)}
+              >
+                <ChevronDown className={`size-4 transition-transform ${customerOpen ? "rotate-180" : ""}`} />
+              </Button>
+            </CardHeader>
+            {customerOpen ? (
+              <CardContent className="pt-0 divide-y divide-border/30">
+                {Object.entries(extraction.customer).map(([label, value]) => (
+                  <Field
+                    key={label}
+                    label={label.replace(/[A-Z]/g, (letter) => ` ${letter}`)}
+                    value={value || "Not provided"}
+                  />
+                ))}
+              </CardContent>
+            ) : null}
+          </Card>
+
+          <Card id="section-summary" className="scroll-mt-28 overflow-hidden border-primary/30 shadow-2xs">
+            <div className="flex items-center justify-between bg-[#1e3a5f] px-4 py-3 text-white sm:px-6">
+              <h2 className="text-base font-bold tracking-wide sm:text-lg">PART SUMMARY</h2>
+              <Badge variant="outline" className="border-white/30 bg-white/10 text-xs text-white">
+                {extractedSummaryRows.length} Line Items extracted
+              </Badge>
+            </div>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-300 bg-slate-100/90 text-xs font-semibold text-slate-800 sm:text-sm">
+                      <th className="border-r border-slate-300 px-3 py-3 text-center">#</th>
+                      <th className="border-r border-slate-300 px-4 py-3 whitespace-nowrap">Part Number</th>
+                      <th className="border-r border-slate-300 px-4 py-3 whitespace-nowrap">Name / Description</th>
+                      <th className="border-r border-slate-300 px-4 py-3 whitespace-nowrap">Work Type</th>
+                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Sq. In. / Unit</th>
+                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Price / Sq. In.</th>
+                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Price / Unit</th>
+                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Quantity</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {extractedSummaryRows.map((row, index) => (
+                      <tr key={row.id} className={index % 2 ? "border-b border-slate-200 bg-slate-100/70" : "border-b border-slate-200 bg-white"}>
+                        <td className="border-r border-slate-200 px-3 py-3.5 text-center text-muted-foreground">{row.num}</td>
+                        <td className="border-r border-slate-200 px-4 py-3.5 font-semibold whitespace-nowrap">{row.partNumber}</td>
+                        <td className="border-r border-slate-200 px-4 py-3.5">
+                          <div className="font-medium whitespace-nowrap">{row.name}</div>
+                          <div className="mt-1 max-w-sm text-xs text-muted-foreground">{row.summary}</div>
+                        </td>
+                        <td className="border-r border-slate-200 px-4 py-3.5 whitespace-nowrap">
+                          <span className="rounded border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-700">{row.workType}</span>
+                        </td>
+                        <td className="border-r border-slate-200 px-4 py-3.5 text-right tabular-nums whitespace-nowrap">{row.area}</td>
+                        <td className="border-r border-slate-200 px-4 py-3.5 text-right tabular-nums whitespace-nowrap">{row.pricePerSqIn}</td>
+                        <td className="border-r border-slate-200 px-4 py-3.5 text-right font-semibold tabular-nums whitespace-nowrap">{row.pricePerUnit}</td>
+                        <td className="border-r border-slate-200 px-4 py-3.5 text-right tabular-nums whitespace-nowrap">{row.qty}</td>
+                        <td className="px-4 py-3.5 text-right font-bold tabular-nums whitespace-nowrap">{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-300 bg-slate-50/80">
+                      <td colSpan={7} className="px-4 py-3.5 text-right font-bold">TOTAL</td>
+                      <td className="border-r border-slate-200 px-4 py-3.5 text-right font-bold tabular-nums">
+                        {extraction.parts.reduce((sum, part) => sum + (part.quantity ?? 0), 0)} pcs
+                      </td>
+                      <td className="px-4 py-3.5 text-right text-lg font-black tabular-nums text-primary">
+                        {pricing ? formatMoney(pricing.quoteTotal) : "Pending"}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
 
       {extraction ? (
         <Card className="border-primary/30 shadow-2xs">
