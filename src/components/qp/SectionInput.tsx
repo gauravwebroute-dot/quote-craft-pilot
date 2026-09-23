@@ -294,7 +294,7 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                 } catch (requestError) {
                   setError(
                     requestError instanceof TypeError
-                      ? "Unable to connect to the extraction service. Please try again or contact support."
+                      ? "Unable to reach the extraction service. Please refresh the page and try again. If this continues, the deployed app origin may need to be added to the backend CORS settings."
                       : requestError instanceof Error
                         ? requestError.message
                         : "Extraction failed.",

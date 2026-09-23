@@ -30,10 +30,21 @@ const allowedOrigins = new Set(
 );
 allowedOrigins.add("https://quote-craft-pilot.vercel.app");
 
+function isAllowedOrigin(origin) {
+  return (
+    !origin ||
+    allowedOrigins.has(origin) ||
+    /^https?:\/\/localhost(?::\d+)?$/.test(origin) ||
+    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin) ||
+    /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin) ||
+    /^https:\/\/[a-z0-9-]+\.lovable\.app$/.test(origin)
+  );
+}
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.has(origin) || /^https?:\/\/localhost(?::\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin)) {
+      if (isAllowedOrigin(origin)) {
         callback(null, true);
         return;
       }
