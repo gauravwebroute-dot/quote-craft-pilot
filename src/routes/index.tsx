@@ -85,6 +85,7 @@ function QuotePilot() {
                 currentSection={focusedSection}
                 onNavigate={handleNavigate}
                 quoteNumber={quoteNumber}
+                extraction={extraction}
               />
             </aside>
           )}

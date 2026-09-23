@@ -58,6 +58,12 @@ type PricingResponse = {
     pricePerUnit?: number;
     totalLineItem?: number;
     reason?: string;
+    breakdown?: {
+      masking?: { areaSqIn: number; cost: number };
+      mediaBlasting?: { areaSqIn: number; cost: number };
+      coating?: { areaSqIn: number; cost: number };
+    };
+    totals?: { baseCost: number; calculatedPrice: number; minimumPriceApplied: boolean };
   }>;
 };
 
@@ -841,6 +847,62 @@ export function SectionExtraction({
               </div>
             </CardContent>
           </Card>
+
+          {focusedSection?.startsWith("part-") ? (() => {
+            const selectedIndex = Number(focusedSection.slice("part-".length)) - 1;
+            const selectedPart = extraction.parts[selectedIndex];
+            const selectedPrice = pricing?.results[selectedIndex];
+            if (!selectedPart) return null;
+            return (
+              <Card id={`section-part-${selectedIndex + 1}`} className="scroll-mt-28 border-primary/30 shadow-2xs">
+                <CardHeader>
+                  <CardTitle className="text-xl font-semibold">
+                    {selectedPart.partNumber || `Part ${selectedIndex + 1}`} Details
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {selectedPart.partSummary || selectedPart.partName || "No part summary provided."}
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <Field label="Part name" value={selectedPart.partName || "Not provided"} />
+                    <Field label="Revision" value={selectedPart.revision || "Not provided"} />
+                    <Field label="Material" value={selectedPart.material || "Not provided"} />
+                    <Field label="Quantity" value={selectedPart.quantity ?? "Not provided"} />
+                    <Field label="Total area" value={selectedPart.totalSurfaceAreaSqIn == null ? "Unknown" : `${selectedPart.totalSurfaceAreaSqIn} SI`} />
+                    <Field label="Coating area" value={selectedPart.coatingAreaSqIn == null ? "Unknown" : `${selectedPart.coatingAreaSqIn} SI`} />
+                    <Field label="Masking area" value={selectedPart.maskingAreaSqIn == null ? "Unknown" : `${selectedPart.maskingAreaSqIn} SI`} />
+                    <Field label="Holes" value={selectedPart.dimensions?.holes?.reduce((sum, hole) => sum + hole.count, 0) || 0} />
+                  </div>
+                  <SubSection title="Coating Details">
+                    <div className="grid gap-x-8 sm:grid-cols-2">
+                      {Object.entries(selectedPart.coatingBom || {}).map(([label, value]) => (
+                        <Field key={label} label={label} value={value || "Not provided"} />
+                      ))}
+                    </div>
+                  </SubSection>
+                  <SubSection title="Pricing Breakdown" tone="strong">
+                    {selectedPrice?.priced ? (
+                      <div className="space-y-2 text-sm">
+                        <KV label="Cerakote coating" value={formatMoney(selectedPrice.breakdown?.coating?.cost ?? 0)} keyBold />
+                        <KV label="Masking" value={formatMoney(selectedPrice.breakdown?.masking?.cost ?? 0)} keyBold />
+                        <KV label="Media blasting" value="Included ($0.00)" keyBold />
+                        <KV label="Calculated price / unit" value={formatMoney(selectedPrice.totals?.calculatedPrice ?? 0)} keyBold />
+                        <KV label="Final price / unit" value={formatMoney(selectedPrice.pricePerUnit ?? 0)} keyBold />
+                        {selectedPrice.totals?.minimumPriceApplied ? (
+                          <p className="pt-2 text-xs font-medium text-warning">$5.00 minimum per unit applied.</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        {selectedPrice?.reason || "Pricing is pending until area and quantity are available."}
+                      </p>
+                    )}
+                  </SubSection>
+                </CardContent>
+              </Card>
+            );
+          })() : null}
         </>
       ) : null}
 

@@ -12,11 +12,12 @@ import {
   Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ExtractionResult } from "./SectionInput";
 
 export type NavigationTarget = {
   step: number;
   section?:
-    "overview" | "customer" | "summary" | "part-1" | "part-2" | "part-3" | "part-4" | "part-5";
+    "overview" | "customer" | "summary" | `part-${number}`;
 };
 
 interface TreeMenuProps {
@@ -24,6 +25,8 @@ interface TreeMenuProps {
   currentSection: string;
   onNavigate: (target: NavigationTarget) => void;
   quoteNumber: string;
+  extraction?: ExtractionResult | null;
+  quoteTotal?: number | null;
   className?: string;
 }
 
@@ -32,19 +35,18 @@ export function TreeMenu({
   currentSection,
   onNavigate,
   quoteNumber,
+  extraction,
+  quoteTotal,
   className,
 }: TreeMenuProps) {
   const [extractionExpanded, setExtractionExpanded] = useState(true);
   const [partDetailsExpanded, setPartDetailsExpanded] = useState(true);
   const [odooExpanded, setOdooExpanded] = useState(true);
 
-  const partList: { id: "part-1" | "part-2" | "part-3" | "part-4" | "part-5"; label: string }[] = [
-    { id: "part-1", label: "PN-A1025" },
-    { id: "part-2", label: "XJ-2048B" },
-    { id: "part-3", label: "CKT-3175" },
-    { id: "part-4", label: "PC-4821X" },
-    { id: "part-5", label: "MFG-5903" },
-  ];
+  const partList = extraction?.parts.map((part, index) => ({
+    id: `part-${index + 1}` as `part-${number}`,
+    label: part.partNumber || part.partName || `Part ${index + 1}`,
+  })) ?? [];
   const isPartSectionActive = currentStep === 1 && currentSection.startsWith("part-");
 
   return (
@@ -118,8 +120,8 @@ export function TreeMenu({
             >
               <Layers className="size-4 shrink-0" />
               <span className="flex-1 truncate">2. Extraction Results</span>
-              <span className="rounded bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
-                5 Parts
+                <span className="rounded bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
+                {extraction ? `${extraction.parts.length} Parts` : "No extraction"}
               </span>
             </button>
           </div>
@@ -154,12 +156,12 @@ export function TreeMenu({
                 <TableProperties className="size-3.5 shrink-0" />
                 <span className="truncate">Part Summary</span>
                 <span className="ml-auto text-[11px] font-semibold tabular-nums opacity-80">
-                  $1,616.50
+                  {quoteTotal == null ? "Pending" : `$${quoteTotal.toFixed(2)}`}
                 </span>
               </button>
 
-              {/* Part Details branch - header highlights whenever ANY part is selected */}
-              <div>
+              {/* Part Details branch is populated from the current extraction. */}
+              {partList.length > 0 ? <div>
                 <div
                   className={cn(
                     "flex items-center rounded-md transition-colors",
@@ -190,7 +192,7 @@ export function TreeMenu({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onNavigate({ step: 1, section: "part-1" })}
+                    onClick={() => onNavigate({ step: 1, section: partList[0].id })}
                     className="flex flex-1 items-center gap-2 py-1.5 pr-2 text-left text-xs sm:text-sm font-medium"
                   >
                     <Box className="size-3.5 shrink-0" />
@@ -217,7 +219,7 @@ export function TreeMenu({
                     ))}
                   </div>
                 )}
-              </div>
+              </div> : null}
             </div>
           )}
         </div>
@@ -285,7 +287,9 @@ export function TreeMenu({
       <div className="mt-4 rounded-lg border border-white/15 bg-black/15 p-2.5 text-xs">
         <div className="flex items-center justify-between text-white/80">
           <span>Quote Total:</span>
-          <span className="font-bold text-[#f5d76e] tabular-nums text-sm">$10,375.00</span>
+          <span className="font-bold text-[#f5d76e] tabular-nums text-sm">
+            {quoteTotal == null ? "Pending" : `$${quoteTotal.toFixed(2)}`}
+          </span>
         </div>
       </div>
     </nav>
