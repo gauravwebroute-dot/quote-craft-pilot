@@ -41,6 +41,10 @@ export const EXTRACTION_TOOL = {
           properties: {
             partNumber: { type: ["string", "null"] },
             partName: { type: ["string", "null"] },
+            partSummary: {
+              type: ["string", "null"],
+              description: "Short plain-language summary of the part and the requested coating work, based only on the RFQ/drawing.",
+            },
             revision: { type: ["string", "null"] },
             isAssembly: { type: ["boolean", "null"] },
             existingCoating: {
@@ -122,7 +126,7 @@ export const EXTRACTION_TOOL = {
             sourceDrawingFile: { type: ["string", "null"], description: "Filename or drawing number this part was extracted from, for traceability." },
           },
           required: [
-            "partNumber", "partName", "revision", "isAssembly", "existingCoating",
+            "partNumber", "partName", "partSummary", "revision", "isAssembly", "existingCoating",
             "material", "partMark", "partMarkSpec", "prepType", "hasScale",
             "quantity", "dimensions", "totalSurfaceAreaSqIn", "coatingAreaSqIn", "maskingAreaSqIn",
             "areaConfidence", "coatingBom", "sourceDrawingFile",

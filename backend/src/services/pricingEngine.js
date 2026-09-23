@@ -33,9 +33,9 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const maskingArea = part.maskingAreaSqIn ?? 0;
 
   // --- Masking ---
-  const maskingMinutes = maskingArea / rc.masking.sqInPerMinute;
+  const maskingMinutes = rc.masking.sqInPerMinute ? maskingArea / rc.masking.sqInPerMinute : 0;
   const maskingLabor = (maskingMinutes / 60) * rc.laborRatePerHour;
-  const maskingMaterial = maskingArea * rc.masking.ratePerSqIn;
+  const maskingMaterial = maskingArea > 0 ? coatingArea * rc.masking.ratePerSqIn : 0;
   const masking = {
     areaSqIn: maskingArea,
     minutes: round2(maskingMinutes),
@@ -43,7 +43,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   };
 
   // --- Media blasting ---
-  const blastMinutes = coatingArea / rc.mediaBlasting.sqInPerMinute;
+  const blastMinutes = rc.mediaBlasting.sqInPerMinute ? coatingArea / rc.mediaBlasting.sqInPerMinute : 0;
   const blastLabor = (blastMinutes / 60) * rc.laborRatePerHour;
   const blastMaterial = coatingArea * rc.mediaBlasting.ratePerSqIn;
   const mediaBlasting = {
@@ -53,16 +53,17 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   };
 
   // --- Coating (primer + topcoat) ---
-  const coatMinutes = coatingArea / rc.coating.sqInPerMinute;
+  const coatMinutes = rc.coating.sqInPerMinute ? coatingArea / rc.coating.sqInPerMinute : 0;
   const coatLabor = (coatMinutes / 60) * rc.laborRatePerHour;
   const materialOz = coatingArea * rc.coating.materialOzPerSqIn;
   const materialCost = materialOz * rc.coating.materialCostPerOz;
   const ovenCost = (rc.coating.ovenMinutesFlat / 60) * rc.ovenLaborRatePerHour;
+  const coatingRateCost = coatingArea * rc.coating.ratePerSqIn;
   const coating = {
     areaSqIn: coatingArea,
     minutes: round2(coatMinutes),
     materialOz: round2(materialOz),
-    cost: round2(coatLabor + materialCost + ovenCost),
+    cost: round2(coatLabor + materialCost + ovenCost + coatingRateCost),
   };
 
   // --- Part mark ---
@@ -79,7 +80,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const discount = baseCost * (adj.discountPct || 0);
   const overheadProfit = baseCost * (adj.overheadProfitPct || 0);
 
-  const pricePerUnit = round2(baseCost + rushOrder + setupExtraWork + shipping - discount + overheadProfit);
+  const calculatedPrice = baseCost + rushOrder + setupExtraWork + shipping - discount + overheadProfit;
+  const pricePerUnit = round2(Math.max(rc.minimumPricePerUnit ?? 0, calculatedPrice));
   const quantity = part.quantity;
   const totalLineItem = round2(pricePerUnit * quantity);
 
@@ -92,6 +94,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
       totalLabor: round2(totalLabor),
       totalMaterial: round2(totalMaterial),
       baseCost: round2(baseCost),
+      calculatedPrice: round2(calculatedPrice),
+      minimumPriceApplied: pricePerUnit > round2(calculatedPrice),
     },
     adjustments: {
       rushOrder: round2(rushOrder),

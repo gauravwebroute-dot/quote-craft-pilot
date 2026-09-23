@@ -24,12 +24,33 @@ router.post("/price", (req, res) => {
     const results = parts.map((part) => calculatePartPrice(part, rateCard, adjustments));
 
     const pricedResults = results.filter((r) => r.priced);
-    const quoteTotal = round2(pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0));
+    const totalAreaSqIn = results.reduce(
+      (sum, result, index) => result.priced
+        ? sum + (parts[index].totalSurfaceAreaSqIn ?? parts[index].coatingAreaSqIn ?? 0) * result.quantity
+        : sum,
+      0,
+    );
+    const chemFilmRequested = adjustments?.chemFilm === true;
+    const chemFilmCalculated = totalAreaSqIn * rateCard.chemFilm.ratePerSqIn;
+    const chemFilmCharge = chemFilmRequested
+      ? Math.max(rateCard.chemFilm.minimumLotFee, chemFilmCalculated)
+      : 0;
+    const quoteTotal = round2(
+      pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) + chemFilmCharge,
+    );
     const unpricedCount = results.length - pricedResults.length;
 
     return res.status(200).json({
       results,
       quoteTotal,
+      chemFilm: {
+        requested: chemFilmRequested,
+        totalAreaSqIn: round2(totalAreaSqIn),
+        ratePerSqIn: rateCard.chemFilm.ratePerSqIn,
+        calculatedCharge: round2(chemFilmCalculated),
+        minimumLotFee: rateCard.chemFilm.minimumLotFee,
+        charge: round2(chemFilmCharge),
+      },
       warning: unpricedCount > 0
         ? `${unpricedCount} of ${results.length} part(s) could not be priced — see each result's "reason".`
         : undefined,
@@ -51,6 +72,7 @@ function mergeRateCard(base, override) {
     masking: { ...base.masking, ...override.masking },
     mediaBlasting: { ...base.mediaBlasting, ...override.mediaBlasting },
     coating: { ...base.coating, ...override.coating },
+    chemFilm: { ...base.chemFilm, ...override.chemFilm },
     adjustments: { ...base.adjustments, ...override.adjustments },
   };
 }

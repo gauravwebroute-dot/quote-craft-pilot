@@ -26,6 +26,8 @@ surface area yourself; a separate deterministic step does that from what you rep
   estimate.
 - Return totalSurfaceAreaSqIn when the PDF supports an estimate, and set areaConfidence to LOW
   for visual, scale, bounding-box, or model-based estimates. Use null only with no usable cue.
+- For every part, provide partName when the drawing names it and partSummary as a concise
+  plain-language description of the part plus the requested finish/process. Do not invent details.
 
 Other rules:
 - Only extract what is EXPLICITLY present in the document, or legitimately estimable per

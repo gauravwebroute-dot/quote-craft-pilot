@@ -42,6 +42,27 @@ import { Field, KV, SubSection } from "./bits";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ExtractionResult } from "./SectionInput";
 
+type PricingResponse = {
+  quoteTotal: number;
+  chemFilm: {
+    requested: boolean;
+    totalAreaSqIn: number;
+    calculatedCharge: number;
+    minimumLotFee: number;
+    charge: number;
+  };
+  results: Array<{
+    priced: boolean;
+    partNumber: string | null;
+    quantity: number;
+    pricePerUnit?: number;
+    totalLineItem?: number;
+    reason?: string;
+  }>;
+};
+
+const formatMoney = (value: number) => `$${value.toFixed(2)}`;
+
 const summaryRows = [
   {
     id: "part-1",
@@ -601,6 +622,52 @@ export function SectionExtraction({
 }) {
   const [customerOpen, setCustomerOpen] = useState(true);
   const [activePartId, setActivePartId] = useState<string>("part-1");
+  const [chemFilmRequested, setChemFilmRequested] = useState(false);
+  const [pricing, setPricing] = useState<PricingResponse | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!extraction?.parts.length) {
+      setPricing(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setPricingError(null);
+    const apiUrl = (
+      import.meta.env["VITE_EXTRACTION_API_URL"] ||
+      (typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+        ? "http://localhost:4000"
+        : "https://quote-craft-pilot.onrender.com")
+    ).replace(/\/$/, "");
+
+    fetch(`${apiUrl}/api/price`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        parts: extraction.parts,
+        adjustments: { chemFilm: chemFilmRequested },
+      }),
+    })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "Pricing failed.");
+        return payload as PricingResponse;
+      })
+      .then((payload) => {
+        if (!cancelled) setPricing(payload);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPricingError(error instanceof Error ? error.message : "Pricing failed.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [extraction, chemFilmRequested]);
 
   // Auto-scroll and keep active part in sync when submenu item is clicked
   useEffect(() => {
@@ -694,6 +761,9 @@ export function SectionExtraction({
                       <p className="text-sm text-muted-foreground">
                         {part.partName || "Name not provided"}
                       </p>
+                      <p className="mt-1 max-w-3xl text-sm text-foreground/80">
+                        {part.partSummary || "Part summary not provided"}
+                      </p>
                     </div>
                     <Badge variant={part.areaConfidence === "LOW" ? "warning" : "success"}>
                       Area: {part.areaConfidence || "UNKNOWN"}
@@ -717,6 +787,10 @@ export function SectionExtraction({
                       <strong>Coating area:</strong> {part.coatingAreaSqIn ?? "Not provided"} sq in
                     </span>
                     <span>
+                      <strong>Holes:</strong>{" "}
+                      {part.dimensions?.holes?.reduce((sum, hole) => sum + hole.count, 0) || 0}
+                    </span>
+                    <span>
                       <strong>Masking area:</strong> {part.maskingAreaSqIn ?? "Not provided"} sq in
                     </span>
                     <span>
@@ -736,6 +810,71 @@ export function SectionExtraction({
                 </ul>
               </div>
             )}
+            <Card className="border-primary/20 shadow-2xs">
+              <CardHeader>
+                <CardTitle className="text-xl font-semibold">Pricing Summary</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Cerakote $0.40/SI, masking adds $0.06/SI when required, media blasting included,
+                  and every part has a $5.00 minimum per unit.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <label className="flex items-center gap-3 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={chemFilmRequested}
+                    onChange={(event) => setChemFilmRequested(event.target.checked)}
+                    className="size-4 accent-primary"
+                  />
+                  Add Chem Film ($0.03/SI, $200 minimum lot fee)
+                </label>
+                {pricingError ? (
+                  <p className="text-sm font-medium text-destructive">{pricingError}</p>
+                ) : pricing ? (
+                  <div className="space-y-3">
+                    <div className="overflow-x-auto rounded-md border border-border">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/60">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Part</th>
+                            <th className="px-3 py-2 text-right">Price / Unit</th>
+                            <th className="px-3 py-2 text-right">Quantity</th>
+                            <th className="px-3 py-2 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pricing.results.map((result) => (
+                            <tr key={result.partNumber ?? result.quantity} className="border-t border-border/60">
+                              <td className="px-3 py-2 font-medium">{result.partNumber || "Part"}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {result.priced ? formatMoney(result.pricePerUnit ?? 0) : "Not priced"}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">{result.quantity}</td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                                {result.priced ? formatMoney(result.totalLineItem ?? 0) : "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="grid gap-2 text-sm sm:grid-cols-3">
+                      <span><strong>Cerakote + masking:</strong> $0.46/SI</span>
+                      <span><strong>Chem Film:</strong> {formatMoney(pricing.chemFilm.charge)}</span>
+                      <span className="font-bold sm:text-right"><strong>Quote total:</strong> {formatMoney(pricing.quoteTotal)}</span>
+                    </div>
+                    {chemFilmRequested ? (
+                      <p className="text-xs text-muted-foreground">
+                        Chem Film uses {pricing.chemFilm.totalAreaSqIn} total SI × $0.03 = {formatMoney(pricing.chemFilm.calculatedCharge)};
+                        the {formatMoney(pricing.chemFilm.minimumLotFee)} minimum lot fee applies when lower.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Calculating pricing...</p>
+                )}
+              </CardContent>
+            </Card>
           </CardContent>
         </Card>
       ) : null}

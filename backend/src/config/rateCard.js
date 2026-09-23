@@ -9,32 +9,38 @@
  * shop's real numbers before using this for real quotes.
  */
 export const DEFAULT_RATE_CARD = {
-  laborRatePerHour: 35.56,
-  ovenLaborRatePerHour: 20.38,
+  minimumPricePerUnit: 5.0,
+  laborRatePerHour: 0,
+  ovenLaborRatePerHour: 0,
 
   masking: {
-    ratePerSqIn: 0.06, // material/consumables cost per sq in masked
-    sqInPerMinute: 11.5, // how much area a worker masks per minute -> derives labor time
+    ratePerSqIn: 0.06,
+    sqInPerMinute: null,
   },
   mediaBlasting: {
-    ratePerSqIn: 0.02,
-    sqInPerMinute: 31.25,
+    ratePerSqIn: 0,
+    sqInPerMinute: null,
   },
   coating: {
-    ratePerSqIn: 0.02,
-    sqInPerMinute: 12.5,
-    materialOzPerSqIn: 0.0052, // paint/powder usage
-    materialCostPerOz: 11.22,
-    ovenMinutesFlat: 35, // cure time, roughly fixed regardless of part size
+    ratePerSqIn: 0.40,
+    sqInPerMinute: null,
+    materialOzPerSqIn: 0,
+    materialCostPerOz: 0,
+    ovenMinutesFlat: 0,
+  },
+
+  chemFilm: {
+    ratePerSqIn: 0.03,
+    minimumLotFee: 200,
   },
 
   partMarkCostEach: 1.0,
 
   adjustments: {
     rushOrderPct: 0, // set per-quote, not a shop default - 0 unless requested
-    setupExtraWorkPct: 0.023,
+    setupExtraWorkPct: 0,
     shippingFlat: 0,
     discountPct: 0,
-    overheadProfitPct: 0.18,
+    overheadProfitPct: 0,
   },
 };

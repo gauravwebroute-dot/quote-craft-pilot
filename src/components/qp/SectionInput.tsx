@@ -24,6 +24,7 @@ ABC Company
 export type ExtractionPart = {
   partNumber: string | null;
   partName: string | null;
+  partSummary: string | null;
   revision: string | null;
   isAssembly: boolean | null;
   existingCoating: string | null;
