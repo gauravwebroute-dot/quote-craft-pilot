@@ -18,21 +18,39 @@ Rules:
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-/**
- * Extract RFQ data using OpenRouter.
- * @param {Array<{ base64: string, mediaType: string, filename: string }>} files
- * @param {string} [emailText]
- * @param {string} [modelName]
- * @returns {Promise<object>} parsed extraction matching EXTRACTION_TOOL.input_schema
- */
 export async function extractFromFiles(files, emailText, modelName) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is missing in environment variables.");
   }
 
-  const model = modelName || process.env.DEFAULT_EXTRACTION_MODEL || "~google/gemini-flash-latest";
+  const defaultModel = process.env.DEFAULT_EXTRACTION_MODEL || "~google/gemini-flash-latest";
+  const model = modelName || defaultModel;
 
+  try {
+    return await executeExtraction(files, emailText, model, apiKey);
+  } catch (err) {
+    // If the chosen model failed and it was not already the default Gemini model, fallback automatically
+    if (model !== defaultModel && model !== "google/gemini-2.5-flash" && model !== "~google/gemini-flash-latest") {
+      console.warn(`[OpenRouter] Extraction with model "${model}" failed (${err.message}). Falling back to Gemini: "${defaultModel}"`);
+      try {
+        const fallbackResult = await executeExtraction(files, emailText, defaultModel, apiKey);
+        if (fallbackResult) {
+          fallbackResult.extractionNotes = [
+            `Notice: Selected model (${model}) was unavailable. Successfully extracted using default model (${defaultModel}).`,
+            ...(fallbackResult.extractionNotes ?? []),
+          ];
+          return fallbackResult;
+        }
+      } catch (fallbackErr) {
+        console.error(`[OpenRouter] Fallback model "${defaultModel}" also failed:`, fallbackErr);
+      }
+    }
+    throw err;
+  }
+}
+
+async function executeExtraction(files, emailText, model, apiKey) {
   if (!files?.length && !emailText) {
     throw new Error("At least one file or emailText must be provided");
   }

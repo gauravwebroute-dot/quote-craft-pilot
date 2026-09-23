@@ -3,7 +3,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileText, Upload, X, ArrowRight, Eye } from "lucide-react";
+import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles } from "lucide-react";
 
 const emailBody = `Hi,
 Could we please get pricing for the attached items? The qty will be 6 each.
@@ -59,14 +59,91 @@ export type ExtractionResult = {
   extractionNotes: string[];
 };
 
+export type ModelOption = {
+  id: string;
+  name: string;
+  description?: string;
+  isDefault?: boolean;
+};
+
+const DEFAULT_MODELS: ModelOption[] = [
+  {
+    id: "~google/gemini-flash-latest",
+    name: "Gemini Flash (latest)",
+    description: "Default • Fast, high-throughput multimodal parsing",
+    isDefault: true,
+  },
+  {
+    id: "~anthropic/claude-sonnet-latest",
+    name: "Claude Sonnet (latest)",
+    description: "Precision blueprint & engineering drawing extraction",
+    isDefault: false,
+  },
+  {
+    id: "meta-llama/llama-4-scout",
+    name: "Llama 4 Scout Vision (Groq)",
+    description: "Ultra-fast open-weights vision parsing",
+    isDefault: false,
+  },
+  {
+    id: "~google/gemini-pro-latest",
+    name: "Gemini Pro (latest)",
+    description: "Deep reasoning & complex multi-part drawing analysis",
+    isDefault: false,
+  },
+];
+
 export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [emailText, setEmailText] = useState(emailBody);
+  const [models, setModels] = useState<ModelOption[]>(DEFAULT_MODELS);
   const [selectedModel, setSelectedModel] = useState("~google/gemini-flash-latest");
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch dynamic models from OpenRouter endpoint on mount
+  useEffect(() => {
+    let cancelled = false;
+    const fetchModels = async () => {
+      setIsLoadingModels(true);
+      try {
+        const apiUrl = (
+          import.meta.env["VITE_EXTRACTION_API_URL"] ||
+          (typeof window !== "undefined" &&
+          (window.location.hostname === "localhost" ||
+            window.location.hostname === "127.0.0.1")
+            ? "http://localhost:4000"
+            : "https://quote-craft-pilot.onrender.com")
+        ).replace(/\/$/, "");
+
+        const res = await fetch(`${apiUrl}/api/models`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.models) && data.models.length > 0 && !cancelled) {
+            setModels(data.models);
+            // If current model not available, fallback to default
+            const exists = data.models.some((m: ModelOption) => m.id === selectedModel);
+            if (!exists) {
+              const def = data.models.find((m: ModelOption) => m.isDefault)?.id || data.models[0].id;
+              setSelectedModel(def);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch models dynamically, using defaults:", err);
+      } finally {
+        if (!cancelled) setIsLoadingModels(false);
+      }
+    };
+
+    fetchModels();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const addFiles = (selectedFiles: FileList | File[]) => {
     const validFiles = Array.from(selectedFiles).filter(
@@ -235,33 +312,44 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
 
       <Card className="transition-colors hover:border-muted-foreground/30">
         <CardHeader>
-          <CardTitle className="text-xl font-semibold">Process the RFQ</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-xl font-semibold">Process the RFQ</CardTitle>
+            <Badge variant="outline" className="text-xs gap-1 font-normal">
+              <Sparkles className="size-3 text-primary" /> Dynamic Model Selection
+            </Badge>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="space-y-2">
-              <Label>AI Model</Label>
+              <div className="flex items-center gap-2">
+                <Label>AI Model</Label>
+                {isLoadingModels ? (
+                  <RefreshCw className="size-3 animate-spin text-muted-foreground" />
+                ) : null}
+              </div>
               <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger className="w-full sm:w-80">
+                <SelectTrigger className="w-full sm:w-96">
                   <SelectValue placeholder="Select model" />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="~google/gemini-flash-latest">
-                    <span className="font-medium">Gemini Flash (latest)</span>{" "}
-                    <span className="text-xs text-muted-foreground">(Default • Fast & Free)</span>
-                  </SelectItem>
-                  <SelectItem value="~anthropic/claude-sonnet-latest">
-                    <span className="font-medium">Claude Sonnet (latest)</span>{" "}
-                    <span className="text-xs text-muted-foreground">(Precision Blueprints)</span>
-                  </SelectItem>
-                  <SelectItem value="meta-llama/llama-4-scout">
-                    <span className="font-medium">Llama 4 Scout Vision (Groq)</span>{" "}
-                    <span className="text-xs text-muted-foreground">(Ultra-fast)</span>
-                  </SelectItem>
-                  <SelectItem value="~google/gemini-pro-latest">
-                    <span className="font-medium">Gemini Pro (latest)</span>{" "}
-                    <span className="text-xs text-muted-foreground">(Deep Reasoning)</span>
-                  </SelectItem>
+                <SelectContent className="max-h-80">
+                  {models.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      <div className="flex flex-col text-left py-0.5">
+                        <span className="font-medium text-sm">
+                          {model.name}
+                          {model.isDefault ? (
+                            <span className="ml-1.5 text-xs text-primary font-bold">(Default)</span>
+                          ) : null}
+                        </span>
+                        {model.description ? (
+                          <span className="text-xs text-muted-foreground line-clamp-1 max-w-sm">
+                            {model.description}
+                          </span>
+                        ) : null}
+                      </div>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -312,3 +400,4 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
     </div>
   );
 }
+

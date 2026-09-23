@@ -1,12 +1,6 @@
 /**
- * Rate card — the actual $ your shop charges per process, per square inch,
- * per hour, etc. Edit these numbers to match your real costs. Nothing in
- * pricingEngine.js should ever need to change when you tune pricing —
- * only this file should.
- *
- * All the "ratePerSqIn" values here are illustrative defaults roughly
- * matching the numbers seen in the original mockup UI. Replace with your
- * shop's real numbers before using this for real quotes.
+ * Rate card — shop pricing factors per process, per square inch,
+ * per lot, etc. Edit these numbers to match real shop rates.
  */
 export const DEFAULT_RATE_CARD = {
   minimumPricePerUnit: 5.0,
@@ -16,31 +10,37 @@ export const DEFAULT_RATE_CARD = {
   masking: {
     ratePerSqIn: 0.06,
     sqInPerMinute: null,
+    defaultHoleDescription: "less than 1\" dia",
   },
   mediaBlasting: {
-    ratePerSqIn: 0,
+    ratePerSqIn: 0.00, // Included ($0.00/SI)
+    minPerSqIn: 0.03, // 0.03 min / SI
     sqInPerMinute: null,
   },
   coating: {
-    ratePerSqIn: 0.40,
-    sqInPerMinute: null,
-    materialOzPerSqIn: 0,
+    processName: "Cerakote Coating Process",
+    ratePerSqIn: 0.40, // $0.40/SI
+    minPerSqIn: 0.03, // 0.03 min / SI
+    materialOzPerSqIn: 0.0035, // 0.0035 oz / SI
     materialCostPerOz: 0,
     ovenMinutesFlat: 0,
+    defaultColorComplexity: "TBD – Cerakote Camo Green FED-STD-595",
+    defaultOvenTime: "TBD",
   },
 
   chemFilm: {
-    ratePerSqIn: 0.03,
-    minimumLotFee: 200,
+    ratePerSqIn: 0.03, // $0.03/SI
+    minimumLotFee: 200.0, // $200 min lot fee
   },
 
   partMarkCostEach: 1.0,
 
   adjustments: {
-    rushOrderPct: 0, // set per-quote, not a shop default - 0 unless requested
-    setupExtraWorkPct: 0,
-    shippingFlat: 0,
-    discountPct: 0,
-    overheadProfitPct: 0,
+    rushOrderPct: 0.0, // 0.0%
+    setupExtraWorkPct: 0.0, // 0.0%
+    shippingFlat: 0.0, // $0.00
+    discountPct: 0.0, // 0.0%
+    overheadProfitPct: 0.0, // 0.0%
   },
 };
+

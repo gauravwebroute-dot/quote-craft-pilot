@@ -4,6 +4,7 @@ import cors from "cors";
 import extractRouter from "./routes/extract.js";
 import priceRouter from "./routes/price.js";
 import odooRouter from "./routes/odoo.js";
+import modelsRouter from "./routes/models.js";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -59,6 +60,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api", extractRouter);
 app.use("/api", priceRouter);
 app.use("/api", odooRouter);
+app.use("/api", modelsRouter);
 
 // Catch-all 404
 app.use((_req, res) => res.status(404).json({ error: "NOT_FOUND" }));
