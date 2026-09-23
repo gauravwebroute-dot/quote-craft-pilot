@@ -840,7 +840,66 @@ export function SectionExtraction({
               </Badge>
             </div>
             <CardContent className="p-0">
-              <div className="divide-y divide-slate-200">
+              <div className="hidden w-full overflow-hidden lg:block">
+                <table className="w-full table-fixed border-collapse text-left text-xs xl:text-sm">
+                  <colgroup>
+                    <col className="w-[4%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[28%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[9%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-slate-300 bg-slate-100/90 font-semibold text-slate-800">
+                      <th className="border-r border-slate-300 px-1.5 py-3 text-center">#</th>
+                      <th className="border-r border-slate-300 px-2 py-3">Part Number</th>
+                      <th className="border-r border-slate-300 px-2 py-3">Name / Description</th>
+                      <th className="border-r border-slate-300 px-2 py-3">Work Type</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Sq. In. / Unit</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Price / Sq. In.</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Price / Unit</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Quantity</th>
+                      <th className="px-2 py-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {extractedSummaryRows.map((row, index) => (
+                      <tr key={row.id} className={index % 2 ? "border-b border-slate-200 bg-slate-100/70" : "border-b border-slate-200 bg-white"}>
+                        <td className="border-r border-slate-200 px-1.5 py-3.5 text-center text-muted-foreground">{row.num}</td>
+                        <td className="break-words border-r border-slate-200 px-2 py-3.5 font-semibold">{row.partNumber}</td>
+                        <td className="break-words border-r border-slate-200 px-2 py-3.5">
+                          <div className="font-medium">{row.name}</div>
+                          <div className="mt-1 break-words text-xs leading-tight text-muted-foreground">{row.summary}</div>
+                        </td>
+                        <td className="border-r border-slate-200 px-2 py-3.5">
+                          <span className="inline-block rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700">{row.workType}</span>
+                        </td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right break-words tabular-nums">{row.area}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right break-words tabular-nums">{row.pricePerSqIn}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right break-words font-semibold tabular-nums">{row.pricePerUnit}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right break-words tabular-nums">{row.qty}</td>
+                        <td className="px-2 py-3.5 text-right break-words font-bold tabular-nums">{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-300 bg-slate-50/80">
+                      <td colSpan={7} className="px-2 py-3.5 text-right font-bold">TOTAL</td>
+                      <td className="border-r border-slate-200 px-2 py-3.5 text-right font-bold tabular-nums">
+                        {extraction.parts.reduce((sum, part) => sum + (part.quantity ?? 0), 0)} pcs
+                      </td>
+                      <td className="px-2 py-3.5 text-right text-lg font-black break-words tabular-nums text-primary">
+                        {pricing ? formatMoney(pricing.quoteTotal) : pricingError ? "Unavailable" : "Pending"}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div className="divide-y divide-slate-200 lg:hidden">
                 {extractedSummaryRows.map((row, index) => (
                   <article key={row.id} className={`min-w-0 p-4 sm:p-5 ${index % 2 ? "bg-slate-100/70" : "bg-white"}`}>
                     <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
