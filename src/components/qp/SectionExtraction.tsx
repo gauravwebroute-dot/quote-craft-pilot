@@ -800,38 +800,49 @@ export function SectionExtraction({
               </Badge>
             </div>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-left text-sm">
+              <div className="w-full overflow-hidden">
+                <table className="w-full table-fixed border-collapse text-left text-xs sm:text-sm">
+                  <colgroup>
+                    <col className="w-[4%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[28%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[9%]" />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-slate-300 bg-slate-100/90 text-xs font-semibold text-slate-800 sm:text-sm">
-                      <th className="border-r border-slate-300 px-3 py-3 text-center">#</th>
-                      <th className="border-r border-slate-300 px-4 py-3 whitespace-nowrap">Part Number</th>
-                      <th className="border-r border-slate-300 px-4 py-3 whitespace-nowrap">Name / Description</th>
-                      <th className="border-r border-slate-300 px-4 py-3 whitespace-nowrap">Work Type</th>
-                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Sq. In. / Unit</th>
-                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Price / Sq. In.</th>
-                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Price / Unit</th>
-                      <th className="border-r border-slate-300 px-4 py-3 text-right whitespace-nowrap">Quantity</th>
-                      <th className="px-4 py-3 text-right whitespace-nowrap">Total</th>
+                      <th className="border-r border-slate-300 px-1.5 py-3 text-center">#</th>
+                      <th className="border-r border-slate-300 px-2 py-3">Part Number</th>
+                      <th className="border-r border-slate-300 px-2 py-3">Name / Description</th>
+                      <th className="border-r border-slate-300 px-2 py-3">Work Type</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Sq. In. / Unit</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Price / Sq. In.</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Price / Unit</th>
+                      <th className="border-r border-slate-300 px-2 py-3 text-right">Quantity</th>
+                      <th className="px-2 py-3 text-right">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {extractedSummaryRows.map((row, index) => (
                       <tr key={row.id} className={index % 2 ? "border-b border-slate-200 bg-slate-100/70" : "border-b border-slate-200 bg-white"}>
-                        <td className="border-r border-slate-200 px-3 py-3.5 text-center text-muted-foreground">{row.num}</td>
-                        <td className="border-r border-slate-200 px-4 py-3.5 font-semibold whitespace-nowrap">{row.partNumber}</td>
-                        <td className="border-r border-slate-200 px-4 py-3.5">
-                          <div className="font-medium whitespace-nowrap">{row.name}</div>
-                          <div className="mt-1 max-w-sm text-xs text-muted-foreground">{row.summary}</div>
+                        <td className="border-r border-slate-200 px-1.5 py-3.5 text-center text-muted-foreground">{row.num}</td>
+                        <td className="break-words border-r border-slate-200 px-2 py-3.5 font-semibold">{row.partNumber}</td>
+                        <td className="break-words border-r border-slate-200 px-2 py-3.5">
+                          <div className="font-medium">{row.name}</div>
+                          <div className="mt-1 text-xs leading-tight text-muted-foreground">{row.summary}</div>
                         </td>
-                        <td className="border-r border-slate-200 px-4 py-3.5 whitespace-nowrap">
-                          <span className="rounded border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-700">{row.workType}</span>
+                        <td className="border-r border-slate-200 px-2 py-3.5">
+                          <span className="inline-block rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700">{row.workType}</span>
                         </td>
-                        <td className="border-r border-slate-200 px-4 py-3.5 text-right tabular-nums whitespace-nowrap">{row.area}</td>
-                        <td className="border-r border-slate-200 px-4 py-3.5 text-right tabular-nums whitespace-nowrap">{row.pricePerSqIn}</td>
-                        <td className="border-r border-slate-200 px-4 py-3.5 text-right font-semibold tabular-nums whitespace-nowrap">{row.pricePerUnit}</td>
-                        <td className="border-r border-slate-200 px-4 py-3.5 text-right tabular-nums whitespace-nowrap">{row.qty}</td>
-                        <td className="px-4 py-3.5 text-right font-bold tabular-nums whitespace-nowrap">{row.total}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right tabular-nums">{row.area}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right tabular-nums">{row.pricePerSqIn}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right font-semibold tabular-nums">{row.pricePerUnit}</td>
+                        <td className="border-r border-slate-200 px-2 py-3.5 text-right tabular-nums">{row.qty}</td>
+                        <td className="px-2 py-3.5 text-right font-bold tabular-nums">{row.total}</td>
                       </tr>
                     ))}
                   </tbody>
