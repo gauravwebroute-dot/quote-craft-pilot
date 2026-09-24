@@ -27,6 +27,10 @@ export type ExtractionPart = {
   partSummary: string | null;
   revision: string | null;
   isAssembly: boolean | null;
+  assemblyConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
+  quoteTarget: "ASSEMBLY" | "COMPONENTS" | "MIXED_SCOPE" | null;
+  isProvisional: boolean | null;
+  coatingPresent: boolean | null;
   existingCoating: string | null;
   material: string | null;
   partMark: boolean | null;
@@ -45,10 +49,19 @@ export type ExtractionPart = {
     diameterIn: number | null;
     holes: Array<{ diameterIn: number; count: number }>;
   } | null;
-  totalSurfaceAreaSqIn: number | null;
+  totalSurfaceAreaSqIn: number;
   coatingAreaSqIn: number | null;
   maskingAreaSqIn: number | null;
-  areaConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
+  areaConfidence: "HIGH" | "MEDIUM-HIGH" | "MEDIUM" | "LOW-MEDIUM" | "LOW";
+  estimationMethod: string | null;
+  reasoningSummary: string | null;
+  bomItems?: Array<{
+    itemNumber: string | null;
+    partNumber: string | null;
+    description: string | null;
+    quantity: number | null;
+    material: string | null;
+  }> | null;
   coatingBom: Record<string, string | null>;
   sourceDrawingFile: string | null;
 };

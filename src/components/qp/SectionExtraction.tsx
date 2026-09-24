@@ -127,6 +127,17 @@ export type PricingResponse = {
 
 const formatMoney = (value: number) => `$${value.toFixed(2)}`;
 
+function renderConfidenceBadge(tier?: string | null) {
+  if (!tier) return null;
+  let variant: "success" | "warning" | "danger" | "neutral" = "neutral";
+  if (tier === "HIGH") variant = "success";
+  else if (tier === "MEDIUM-HIGH") variant = "success";
+  else if (tier === "MEDIUM") variant = "warning";
+  else if (tier === "LOW-MEDIUM") variant = "warning";
+  else if (tier === "LOW") variant = "danger";
+  return <Badge variant={variant}>{tier} confidence</Badge>;
+}
+
 // Reusable Pricing Item Group with clean bold headers and small-print parentheticals
 function PricingGroupCard({
   title,
@@ -206,19 +217,19 @@ function PartDetailCard({
   const coatingBomEntries: Array<{ label: string; value: string; warn?: boolean }> = [
     { label: "Masking", value: part.coatingBom?.masking || "None", warn: !part.coatingBom?.masking || part.coatingBom.masking.toLowerCase() === "none" },
     { label: "Media Blasting", value: part.coatingBom?.mediaBlasting || "Not listed", warn: !part.coatingBom?.mediaBlasting || part.coatingBom.mediaBlasting.toLowerCase() === "not listed" },
-    { label: "Primer", value: part.coatingBom?.primer || "N/A" },
-    { label: "Prep", value: part.coatingBom?.prep || part.prepType || "N/A" },
-    { label: "Topcoat", value: part.coatingBom?.topcoat || "N/A" },
-    { label: "Color", value: part.coatingBom?.color || "N/A" },
-    { label: "Coverage", value: part.coatingBom?.coverage || "N/A" },
-    { label: "Sequencing", value: part.coatingBom?.sequencing || "N/A" },
+    { label: "Primer", value: part.coatingBom?.primer || "NOT_SPECIFIED" },
+    { label: "Prep", value: part.coatingBom?.prep || part.prepType || "NOT_SPECIFIED" },
+    { label: "Topcoat", value: part.coatingBom?.topcoat || "NOT_SPECIFIED" },
+    { label: "Color", value: part.coatingBom?.color || "NOT_SPECIFIED" },
+    { label: "Coverage", value: part.coatingBom?.coverage || "NOT_SPECIFIED" },
+    { label: "Sequencing", value: part.coatingBom?.sequencing || "NOT_SPECIFIED" },
   ];
 
   return (
     <div className="rounded-xl border border-primary/40 bg-card shadow-md">
       {/* Header bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 p-4 sm:p-5 bg-muted/20">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           {onBackToSummary && (
             <Button variant="outline" size="sm" onClick={onBackToSummary} className="h-8 gap-1 text-xs">
               <ArrowLeft className="size-3.5" /> Back to Summary
@@ -227,6 +238,21 @@ function PartDetailCard({
           <Badge variant="outline" className="font-mono text-sm px-2.5 py-1 font-bold">
             {partNumber}
           </Badge>
+          {part.isProvisional ? (
+            <Badge variant="danger" className="text-xs font-bold uppercase tracking-wide">
+              PROVISIONAL
+            </Badge>
+          ) : null}
+          {part.isAssembly ? (
+            <Badge variant="neutral" className="text-xs">
+              Assembly {part.assemblyConfidence ? `(${part.assemblyConfidence})` : ""}
+            </Badge>
+          ) : null}
+          {part.quoteTarget ? (
+            <Badge variant="outline" className="text-xs font-semibold">
+              Scope: {part.quoteTarget}
+            </Badge>
+          ) : null}
           <span className="text-base font-semibold text-foreground">{partName}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -276,60 +302,68 @@ function PartDetailCard({
                         <span className="font-mono text-sm">{part.sourceDrawingFile}</span>
                       </span>
                     ) : (
-                      "Not specified"
+                      "NOT_SPECIFIED"
                     )
                   }
                 />
-                <Field label="Part Number" value={part.partNumber || "N/A"} />
-                <Field label="Part Name" value={part.partName || "N/A"} />
-                <Field label="Revision" value={part.revision || "N/A"} />
+                <Field label="Part Number" value={part.partNumber || "NOT_FOUND"} />
+                <Field label="Part Name" value={part.partName || "NOT_SPECIFIED"} />
+                <Field label="Revision" value={part.revision || "NOT_SPECIFIED"} />
                 <Field
                   label="Is Assembly"
-                  value={part.isAssembly === true ? "Yes" : part.isAssembly === false ? "No" : "N/A"}
+                  value={
+                    part.isAssembly === true
+                      ? `Yes (${part.assemblyConfidence || "HIGH"} confidence)`
+                      : part.isAssembly === false
+                        ? "No"
+                        : "NOT_SPECIFIED"
+                  }
+                />
+                {part.quoteTarget && <Field label="Quote Target" value={part.quoteTarget} />}
+                <Field
+                  label="Coating Present?"
+                  value={
+                    part.coatingPresent === false
+                      ? "No (Explicit Negation / Uncoated)"
+                      : part.coatingPresent === true
+                        ? "Yes"
+                        : "NOT_SPECIFIED"
+                  }
                 />
                 <Field
                   label="(E) Coating?"
-                  value={part.existingCoating || "None / Unknown"}
-                  warn={part.existingCoating == null}
+                  value={part.existingCoating || "NOT_SPECIFIED"}
+                  warn={!part.existingCoating || part.existingCoating === "NOT_SPECIFIED"}
                 />
-                <Field label="Material" value={part.material || "N/A"} />
+                <Field label="Material" value={part.material || "NOT_SPECIFIED"} />
                 <Field label="Part Mark" value={part.partMark ? "Yes" : "No"} />
                 {part.partMarkSpec ? <Field label="Part Mark Spec" value={part.partMarkSpec} /> : null}
-                <Field label="Prep Type" value={part.prepType || "N/A"} />
+                <Field label="Prep Type" value={part.prepType || "NOT_SPECIFIED"} />
                 <Field
                   label="Scale Present?"
-                  value={part.hasScale === true ? "Yes" : part.hasScale === false ? "No" : "Unknown"}
+                  value={part.hasScale === true ? "Yes" : part.hasScale === false ? "No" : "NOT_SPECIFIED"}
                   warn={part.hasScale == null}
                 />
                 <Field
                   label="Total Surface (Sq In)"
                   editable={false}
                   value={
-                    part.totalSurfaceAreaSqIn != null ? (
-                      <span className="flex items-center gap-2">
-                        <span>{part.totalSurfaceAreaSqIn} sq in</span>
-                        {part.areaConfidence ? (
-                          <Badge
-                            variant={
-                              part.areaConfidence === "HIGH"
-                                ? "success"
-                                : part.areaConfidence === "MEDIUM"
-                                  ? "warning"
-                                  : "danger"
-                            }
-                          >
-                            {part.areaConfidence} confidence
-                          </Badge>
-                        ) : null}
-                      </span>
-                    ) : (
-                      "N/A (Missing dimensions)"
-                    )
+                    <span className="flex items-center gap-2">
+                      <span className="font-semibold">{part.totalSurfaceAreaSqIn} sq in</span>
+                      {renderConfidenceBadge(part.areaConfidence)}
+                    </span>
                   }
                 />
+                {part.estimationMethod && (
+                  <Field
+                    label="Estimation Method"
+                    editable={false}
+                    value={part.estimationMethod}
+                  />
+                )}
                 <Field
                   label="Coating Area (Sq In)"
-                  value={part.coatingAreaSqIn != null ? `${part.coatingAreaSqIn} sq in` : part.totalSurfaceAreaSqIn != null ? `${part.totalSurfaceAreaSqIn} sq in` : "N/A"}
+                  value={part.coatingAreaSqIn != null ? `${part.coatingAreaSqIn} sq in` : `${part.totalSurfaceAreaSqIn} sq in`}
                 />
                 <Field
                   label="Masking Area (Sq In)"
@@ -345,9 +379,42 @@ function PartDetailCard({
               </div>
             </SubSection>
 
+            {/* Preserved BOM Items SubSection (Per PRD v4: Preserve BOM separately) */}
+            {part.bomItems && part.bomItems.length > 0 && (
+              <SubSection title="Bill of Materials (BOM) — Preserved Separately" tone="plain">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Preserved separately for reference and component scope analysis — not merged into primary quote target.
+                </p>
+                <div className="overflow-x-auto rounded border border-border">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted/60 font-semibold border-b border-border">
+                      <tr>
+                        <th className="p-2">Item #</th>
+                        <th className="p-2">Part Number</th>
+                        <th className="p-2">Description</th>
+                        <th className="p-2 text-right">Qty</th>
+                        <th className="p-2">Material</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {part.bomItems.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-muted/20">
+                          <td className="p-2 font-mono">{item.itemNumber || idx + 1}</td>
+                          <td className="p-2 font-medium">{item.partNumber || "NOT_SPECIFIED"}</td>
+                          <td className="p-2 text-muted-foreground">{item.description || "NOT_SPECIFIED"}</td>
+                          <td className="p-2 text-right tabular-nums">{item.quantity ?? 1}</td>
+                          <td className="p-2">{item.material || "NOT_SPECIFIED"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SubSection>
+            )}
+
             <SubSection title="Coating Details (Coating BOM)">
               <p className="mb-3 text-xs text-muted-foreground">
-                Extracted directly from drawing finish specifications.
+                Extracted verbatim directly from drawing finish specifications (no paraphrasing).
               </p>
               <dl className="grid gap-x-8 sm:grid-cols-2 divide-y sm:divide-y-0 divide-border/40">
                 {coatingBomEntries.map(({ label, value, warn }) => (
@@ -542,6 +609,32 @@ function PartDetailCard({
           <TabsContent value="notes" className="space-y-5 focus-visible:outline-none">
             <SubSection title="AI Extraction Notes & Warnings" tone="warning">
               <ul className="space-y-3 text-sm">
+                {part.isProvisional ? (
+                  <li className="flex items-start gap-2.5 font-medium text-amber-500">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      <strong>Provisional Part Identification:</strong> Part number or title block was not definitively resolved from drawing text. Flagged as provisional for human review.
+                    </span>
+                  </li>
+                ) : null}
+                {part.reasoningSummary ? (
+                  <li className="flex items-start gap-2.5 text-foreground">
+                    <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+                    <div>
+                      <span className="font-semibold">Area Estimation Reasoning: </span>
+                      <span className="text-muted-foreground">{part.reasoningSummary}</span>
+                    </div>
+                  </li>
+                ) : null}
+                {part.estimationMethod ? (
+                  <li className="flex items-start gap-2.5 text-foreground">
+                    <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+                    <div>
+                      <span className="font-semibold">Estimation Method: </span>
+                      <span className="font-mono text-xs">{part.estimationMethod}</span>
+                    </div>
+                  </li>
+                ) : null}
                 {extractionNotes.length > 0 ? (
                   extractionNotes.map((note, i) => (
                     <li key={i} className="flex items-start gap-2.5 font-medium text-warning">
@@ -549,15 +642,15 @@ function PartDetailCard({
                       <span>{note}</span>
                     </li>
                   ))
-                ) : (
+                ) : !part.isProvisional && !part.reasoningSummary && !part.estimationMethod ? (
                   <li className="flex items-center gap-2 text-muted-foreground text-sm">
                     <Info className="size-4" /> No specific warnings flagged for this part.
                   </li>
-                )}
+                ) : null}
                 {part.areaConfidence ? (
-                  <li className="grid grid-cols-1 sm:grid-cols-4 gap-1 pt-2 border-t border-warning/20">
-                    <span className="font-bold text-foreground sm:text-right pr-2">Area Confidence:</span>
-                    <span className="sm:col-span-3 text-foreground">{part.areaConfidence}</span>
+                  <li className="flex items-center gap-2 pt-2 border-t border-warning/20">
+                    <span className="font-bold text-foreground">Area Confidence:</span>
+                    {renderConfidenceBadge(part.areaConfidence)}
                   </li>
                 ) : null}
               </ul>

@@ -46,41 +46,81 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
 
     const extraction = await extractFromFiles(files, emailText || undefined, model);
 
-    // Prefer deterministic geometry, but preserve the model's explicitly
-    // labeled LOW-confidence estimate when structured dimensions are absent.
+    // PRD v4 Post-Processing & Validation Rules
     if (Array.isArray(extraction?.parts)) {
       extraction.parts = extraction.parts.map((part) => {
-        const result = calculateSurfaceArea(part.dimensions);
-        if (result.computed) {
-          return {
-            ...part,
-            totalSurfaceAreaSqIn: result.areaSqIn,
-            areaConfidence: result.confidence,
-            extractionNotes: undefined, // per-part notes aren't a field; method goes into the shared list below
-            _areaMethod: result.method,
-          };
+        // 1. Mandatory Surface Area Calculation & Tier Resolution
+        const areaResult = calculateSurfaceArea(part.dimensions, part.totalSurfaceAreaSqIn);
+        const resolvedArea = areaResult.areaSqIn;
+        const resolvedConfidence = areaResult.confidence;
+        const resolvedMethod = part.estimationMethod || areaResult.method;
+        const resolvedReasoning = part.reasoningSummary || areaResult.reasoningSummary;
+
+        // 2. Coating Detection & Negation Handling
+        const searchScope = `${emailText} ${part.partSummary || ""} ${JSON.stringify(part.coatingBom || {})}`.toUpperCase();
+        const hasExplicitNegation =
+          /NO COATING REQUIRED|UNCOATED|BARE METAL\s*[-—]\s*NO FINISH|NO FINISH REQUIRED/.test(searchScope);
+
+        let coatingPresent = part.coatingPresent;
+        if (hasExplicitNegation) {
+          coatingPresent = false;
+        } else {
+          const hasCoatingSpec =
+            /COAT|COATING|PRIMER|CARC|POWDER\s*COAT|PAINT|ANODIZE|PLATING|FINISH|MIL-DTL|MIL-PRF|MIL-C/.test(searchScope) ||
+            Boolean(part.coatingBom?.topcoat || part.coatingBom?.primer);
+          if (hasCoatingSpec) {
+            coatingPresent = true;
+          }
         }
-        if (typeof part.totalSurfaceAreaSqIn === "number" && part.totalSurfaceAreaSqIn > 0) {
-          return {
-            ...part,
-            areaConfidence: part.areaConfidence || "LOW",
-            _areaMethod: "Model-provided fallback estimate from the drawing; verify before quoting.",
-          };
+
+        // Coating Consistency: if coating is present, ensure not 'UNKNOWN' or 'NONE'
+        if (coatingPresent && part.coatingBom) {
+          if (part.coatingBom.topcoat && /unknown|none/i.test(part.coatingBom.topcoat)) {
+            part.coatingBom.topcoat = "Coating specified per drawing notes";
+          }
         }
-        return { ...part, totalSurfaceAreaSqIn: null, areaConfidence: null, _areaReason: result.reason };
+
+        // 3. Assembly Detection & Missing Title Block Guardrail
+        let partNumber = part.partNumber?.trim() || null;
+        let isProvisional = part.isProvisional || false;
+        if (part.isAssembly && (!partNumber || /unknown|none/i.test(partNumber))) {
+          if (Array.isArray(part.bomItems) && part.bomItems.length > 0 && part.bomItems[0].partNumber) {
+            partNumber = part.bomItems[0].partNumber;
+            isProvisional = true;
+          } else {
+            partNumber = "NOT_FOUND";
+            isProvisional = true;
+          }
+        }
+
+        // 4. Non-Area Hallucination Guardrail: explicitly NOT_SPECIFIED if unaddressed
+        const material = part.material?.trim() || "NOT_SPECIFIED";
+        const prepType = part.prepType?.trim() || "NOT_SPECIFIED";
+        const existingCoating = part.existingCoating?.trim() || "NOT_SPECIFIED";
+        const partMarkSpec = part.partMark ? (part.partMarkSpec?.trim() || "Per drawing spec") : "NOT_SPECIFIED";
+
+        return {
+          ...part,
+          partNumber,
+          isProvisional,
+          material,
+          prepType,
+          existingCoating,
+          partMarkSpec,
+          coatingPresent,
+          totalSurfaceAreaSqIn: resolvedArea,
+          areaConfidence: resolvedConfidence,
+          estimationMethod: resolvedMethod,
+          reasoningSummary: resolvedReasoning,
+          _areaMethod: `${resolvedMethod} (${resolvedConfidence}): ${resolvedReasoning}`,
+        };
       });
 
       const areaNotes = extraction.parts
-        .map((p) =>
-          p._areaMethod
-            ? `${p.partNumber ?? "Part"}: area computed - ${p._areaMethod}`
-            : p._areaReason
-              ? `${p.partNumber ?? "Part"}: area not computed - ${p._areaReason}`
-              : null,
-        )
+        .map((p) => (p._areaMethod ? `${p.partNumber ?? "Part"}: ${p._areaMethod}` : null))
         .filter(Boolean);
       extraction.extractionNotes = [...(extraction.extractionNotes ?? []), ...areaNotes];
-      extraction.parts = extraction.parts.map(({ _areaMethod, _areaReason, ...rest }) => rest);
+      extraction.parts = extraction.parts.map(({ _areaMethod, ...rest }) => rest);
     }
 
     return res.status(200).json({ extraction });

@@ -47,14 +47,46 @@ export const EXTRACTION_TOOL = {
             },
             revision: { type: ["string", "null"] },
             isAssembly: { type: ["boolean", "null"] },
+            assemblyConfidence: {
+              type: ["string", "null"],
+              enum: ["HIGH", "MEDIUM", "LOW", null],
+              description: "HIGH if notes explicitly state assembly or multi-item BOM present. LOW if only ambiguous/weak signal (e.g. single balloon callout with no BOM table).",
+            },
+            quoteTarget: {
+              type: ["string", "null"],
+              enum: ["ASSEMBLY", "COMPONENTS", "MIXED_SCOPE", null],
+              description: "ASSEMBLY if notes specify finish complete assembly or after rivet install. COMPONENTS if coated before assembly. MIXED_SCOPE if some components coated pre-assembly and others post-assembly.",
+            },
+            isProvisional: {
+              type: ["boolean", "null"],
+              description: "TRUE if title block was missing on an assembly and provisional fallback was applied to highest-level BOM item.",
+            },
+            bomItems: {
+              type: "array",
+              description: "BOM line items preserved separately for reference and analysis. Never merge BOM items into primary quote item.",
+              items: {
+                type: "object",
+                properties: {
+                  itemNumber: { type: ["string", "null"] },
+                  partNumber: { type: ["string", "null"] },
+                  description: { type: ["string", "null"] },
+                  quantity: { type: ["number", "null"] },
+                  material: { type: ["string", "null"] },
+                },
+              },
+            },
+            coatingPresent: {
+              type: ["boolean", "null"],
+              description: "TRUE if coating spec found (COAT, CARC, POWDER COAT, PAINT, ANODIZE, etc.). FALSE if explicit negation ('NO COATING REQUIRED', 'UNCOATED', 'BARE METAL — NO FINISH').",
+            },
             existingCoating: {
               type: ["string", "null"],
-              description: "Whether the part already has an existing coating that needs to be considered/removed. Null/'Unknown' if the drawing doesn't say.",
+              description: "Whether the part already has an existing coating that needs to be considered/removed. 'NOT_SPECIFIED' if the drawing doesn't say.",
             },
-            material: { type: ["string", "null"], description: "Base material, e.g. 'Steel', 'Aluminum'. Infer from drawing notes/title block only if explicitly stated - do not guess from geometry." },
+            material: { type: ["string", "null"], description: "Base material, e.g. 'Steel', 'Aluminum'. Return 'NOT_SPECIFIED' if not explicitly stated - never guess from geometry." },
             partMark: { type: ["boolean", "null"], description: "Whether the drawing calls for a part mark / ink stamp." },
-            partMarkSpec: { type: ["string", "null"], description: "Full part-mark instruction text if present (format, method, location)." },
-            prepType: { type: ["string", "null"], description: "Surface prep method called out, e.g. 'Media blasting'." },
+            partMarkSpec: { type: ["string", "null"], description: "Full part-mark instruction text verbatim if present (format, method, location). 'NOT_SPECIFIED' if absent." },
+            prepType: { type: ["string", "null"], description: "Surface prep method called out verbatim, e.g. 'Media blasting'. 'NOT_SPECIFIED' if absent." },
             hasScale: { type: ["boolean", "null"], description: "Whether mill scale / existing scale is present and needs removal. Null if not addressed." },
             quantity: { type: ["number", "null"] },
             dimensions: {
@@ -66,7 +98,7 @@ export const EXTRACTION_TOOL = {
                   type: ["string", "null"],
                   enum: ["EXPLICIT_CALLOUT", "FLAT_PATTERN_VIEW", "VISUAL_ESTIMATE_FROM_REFERENCE", "NONE", null],
                   description:
-                    "EXPLICIT_CALLOUT: dimensions are literally written on the drawing. FLAT_PATTERN_VIEW: a separate unfolded/flat-pattern view with its own dimensions is present (needed for folded sheet metal). VISUAL_ESTIMATE_FROM_REFERENCE: no dimensions are written anywhere, but a known-size reference object visible in the image (e.g. a rivet/bolt/hole whose exact size IS stated in the drawing's BOM/parts list table) lets you estimate overall proportions by comparing pixel sizes in the image against that reference. NONE: no dimensions and no usable reference object at all.",
+                    "EXPLICIT_CALLOUT: dimensions are literally written on the drawing. FLAT_PATTERN_VIEW: a separate unfolded/flat-pattern view with its own dimensions is present (needed for folded sheet metal). VISUAL_ESTIMATE_FROM_REFERENCE: no dimensions are written anywhere, but a known-size reference object visible in the image lets you estimate overall proportions. NONE: no dimensions and no usable reference object at all.",
                 },
                 referenceObjectUsed: {
                   type: ["string", "null"],
@@ -76,7 +108,7 @@ export const EXTRACTION_TOOL = {
                   type: ["string", "null"],
                   enum: ["flat_plate", "cylindrical", "complex_folded", "unknown", null],
                   description:
-                    "flat_plate: a single flat sheet, possibly with holes. cylindrical: round tube/rod/pipe. complex_folded: multiple bent/joined faces (brackets, riveted multi-panel assemblies) - true surface area needs a flat-pattern view or 3D model; do NOT estimate this from overall bounding-box dimensions alone, that undercounts folded/bent area badly.",
+                    "flat_plate: a single flat sheet, possibly with holes. cylindrical: round tube/rod/pipe. complex_folded: multiple bent/joined faces (brackets, riveted multi-panel assemblies).",
                 },
                 overallLengthIn: { type: ["number", "null"] },
                 overallWidthIn: { type: ["number", "null"] },
@@ -84,7 +116,7 @@ export const EXTRACTION_TOOL = {
                 diameterIn: { type: ["number", "null"], description: "For cylindrical/round parts only." },
                 holes: {
                   type: "array",
-                  description: "Cutouts/holes to subtract from a flat plate's area, only if their size is stated or reliably estimable (e.g. matches a BOM-specified fastener size).",
+                  description: "Cutouts/holes to subtract from a flat plate's area, only if their size is stated or reliably estimable.",
                   items: {
                     type: "object",
                     properties: {
@@ -98,19 +130,27 @@ export const EXTRACTION_TOOL = {
               required: ["source", "referenceObjectUsed", "shapeType", "overallLengthIn", "overallWidthIn", "overallHeightIn", "diameterIn", "holes"],
             },
             totalSurfaceAreaSqIn: {
-              type: ["number", "null"],
-              description: "Return the best total exterior surface-area estimate in square inches when the drawing provides enough visual, scale, dimensional, or reference information. Use null only when the PDF provides no usable area cue at all. This may be a LOW-confidence estimate for folded parts.",
+              type: "number",
+              description: "MANDATORY: Surface area in square inches is REQUIRED for quotation generation. The system must ALWAYS return a surface area value. Returning NULL, UNKNOWN, or empty area values is not allowed under any circumstance. Provide the best possible engineering estimate from visual cues/scale if dimensions are absent.",
             },
             coatingAreaSqIn: { type: ["number", "null"], description: "Surface area that actually receives coating (may be less than total if some faces are masked)." },
             maskingAreaSqIn: { type: ["number", "null"] },
             areaConfidence: {
-              type: ["string", "null"],
-              enum: ["HIGH", "MEDIUM", "LOW", null],
-              description: "Use HIGH for exact callout math, MEDIUM for a flat-pattern calculation, and LOW for any visual, scale, bounding-box, or model-based estimate.",
+              type: "string",
+              enum: ["HIGH", "MEDIUM-HIGH", "MEDIUM", "LOW-MEDIUM", "LOW"],
+              description: "HIGH: Drawing-stated / CAD-derived (90-100%). MEDIUM-HIGH: Dimension-based calculation (70-89%). MEDIUM: Geometry estimation (50-69%). LOW-MEDIUM: BOM-assisted estimation (30-49%). LOW: Visual estimation only (<30%).",
+            },
+            estimationMethod: {
+              type: "string",
+              description: "Names which source/step in the Estimation Order was used: Drawing-stated area, CAD-derived area, Dimension-based calculation, Geometry estimation, BOM-assisted estimation, or Visual estimation.",
+            },
+            reasoningSummary: {
+              type: "string",
+              description: "Reasoning summary: names which step in Estimation Order was used and why higher-priority methods were unavailable; logs any cross-priority conflicts between notes, finish specs, title block, and email.",
             },
             coatingBom: {
               type: "object",
-              description: "Coating bill-of-materials / finish spec, straight from the drawing's FINISH notes.",
+              description: "Coating bill-of-materials / finish spec, straight from the drawing's FINISH notes verbatim (no paraphrasing).",
               properties: {
                 masking: { type: ["string", "null"] },
                 mediaBlasting: { type: ["string", "null"] },
