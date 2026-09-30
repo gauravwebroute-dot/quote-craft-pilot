@@ -106,7 +106,11 @@ const DEFAULT_MODELS: ModelOption[] = [
   },
 ];
 
-export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) => void }) {
+export function SectionInput({
+  onRun,
+}: {
+  onRun: (extraction: ExtractionResult, files: File[]) => void;
+}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -309,14 +313,14 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
           </div>
           <div className="space-y-2">
             <Label>Business Unit</Label>
-            <Select defaultValue="mad">
+            <Select defaultValue="oc">
               <SelectTrigger className="w-full sm:w-80">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="maverick">Maverick Powder Coating</SelectItem>
                 <SelectItem value="oc">OC Custom Coating</SelectItem>
                 <SelectItem value="mad">MAD Custom-Coating</SelectItem>
+                <SelectItem value="maverick">Maverick Powder Coating</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -391,7 +395,7 @@ export function SectionInput({ onRun }: { onRun: (extraction: ExtractionResult) 
                   });
                   const payload = await response.json();
                   if (!response.ok) throw new Error(payload.message || "Extraction failed.");
-                  onRun(payload.extraction);
+                  onRun(payload.extraction, uploadedFiles);
                 } catch (requestError) {
                   setError(
                     requestError instanceof TypeError

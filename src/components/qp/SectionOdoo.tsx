@@ -13,9 +13,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { AlertTriangle, ArrowLeft, CheckCircle2, PlusCircle, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileSpreadsheet, PlusCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
+import { downloadOdooCsv } from "@/lib/odooCsvExport";
 
 type PartCrossCheck = {
   partNumber: string | null;
@@ -67,9 +68,11 @@ function money(n?: number) {
 export function SectionOdoo({
   onBack,
   extraction,
+  quoteNumber,
 }: {
   onBack: () => void;
   extraction?: ExtractionResult | null;
+  quoteNumber?: string;
 }) {
   const [crossCheck, setCrossCheck] = useState<CrossCheckResult | null>(null);
   const [isChecking, setIsChecking] = useState(false);
@@ -79,6 +82,12 @@ export function SectionOdoo({
   const [createResults, setCreateResults] = useState<
     Record<string, CreateResult | { error: string }>
   >({});
+
+  const handleDownloadCsv = () => {
+    if (!extraction?.parts?.length) return;
+    const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
+    downloadOdooCsv(extraction.parts, customer, null, `${quoteNumber || "quotation"}_odoo_import.csv`);
+  };
 
   const runCrossCheck = async () => {
     if (!extraction) {
@@ -152,10 +161,21 @@ export function SectionOdoo({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button onClick={runCrossCheck} disabled={isChecking}>
-          <RefreshCw className="size-4" /> {isChecking ? "Checking..." : "Run Cross-Check"}
-        </Button>
-        <Badge variant="neutral">BU: Maverick Powder Coating</Badge>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button onClick={runCrossCheck} disabled={isChecking}>
+            <RefreshCw className="size-4" /> {isChecking ? "Checking..." : "Run Cross-Check"}
+          </Button>
+          {extraction?.parts && extraction.parts.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={handleDownloadCsv}
+              className="gap-2 text-emerald-700 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-500/10"
+            >
+              <FileSpreadsheet className="size-4" /> Download Odoo Import CSV
+            </Button>
+          )}
+        </div>
+        <Badge variant="neutral">BU: OC Custom Coating</Badge>
       </div>
 
       {error ? (

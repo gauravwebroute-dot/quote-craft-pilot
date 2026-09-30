@@ -32,6 +32,7 @@ export const Route = createFileRoute("/")({
 function QuotePilot() {
   const [step, setStep] = useState(1);
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [focusedSection, setFocusedSection] = useState<string>("overview");
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
@@ -96,8 +97,9 @@ function QuotePilot() {
 
             {step === 0 ? (
               <SectionInput
-                onRun={(result) => {
+                onRun={(result, files) => {
                   setExtraction(result);
+                  setUploadedFiles(files);
                   setStep(1);
                   setFocusedSection("overview");
                 }}
@@ -117,6 +119,8 @@ function QuotePilot() {
                 focusedSection={focusedSection}
                 onSelectSection={(sec) => setFocusedSection(sec)}
                 extraction={extraction}
+                uploadedFiles={uploadedFiles}
+                quoteNumber={quoteNumber}
               />
             ) : null}
 
@@ -127,6 +131,7 @@ function QuotePilot() {
                   setFocusedSection("overview");
                 }}
                 extraction={extraction}
+                quoteNumber={quoteNumber}
               />
             ) : null}
           </div>

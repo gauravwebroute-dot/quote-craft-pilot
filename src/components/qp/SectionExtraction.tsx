@@ -35,6 +35,7 @@ import {
 import { Field, KV, SubSection } from "./bits";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ExtractionResult, ExtractionPart } from "./SectionInput";
+import { downloadOdooCsv } from "@/lib/odooCsvExport";
 
 export type PricingPartBreakdown = {
   priced: boolean;
@@ -138,7 +139,7 @@ function renderConfidenceBadge(tier?: string | null) {
   return <Badge variant={variant}>{tier} confidence</Badge>;
 }
 
-// Reusable Pricing Item Group with clean bold headers and small-print parentheticals
+// Reusable Pricing Item Group with clean bold headers (doubled font size per PRD v2 Item 3) and small-print parentheticals
 function PricingGroupCard({
   title,
   costBadge,
@@ -153,11 +154,11 @@ function PricingGroupCard({
   }>;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-2xs">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between border-b border-border/50 pb-2">
-        <h5 className="text-base font-bold text-foreground">{title}</h5>
+    <div className="rounded-lg border border-border bg-card p-4 sm:p-5 shadow-2xs">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-border/50 pb-3">
+        <h4 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">{title}</h4>
         {costBadge ? (
-          <span className="text-xs font-semibold tabular-nums text-primary bg-primary/10 px-2 py-0.5 rounded">
+          <span className="text-sm sm:text-base font-bold tabular-nums text-primary bg-primary/10 px-3 py-1 rounded-md">
             {costBadge}
           </span>
         ) : null}
@@ -186,6 +187,8 @@ interface PartDetailCardProps {
   index: number;
   pricing?: PricingPartBreakdown;
   extractionNotes?: string[];
+  uploadedFiles?: File[];
+  onOpenDrawing?: (drawingName?: string | null) => void;
   onBackToSummary?: () => void;
 }
 
@@ -194,13 +197,21 @@ function PartDetailCard({
   index,
   pricing,
   extractionNotes = [],
+  uploadedFiles = [],
+  onOpenDrawing,
   onBackToSummary,
 }: PartDetailCardProps) {
   const [activeTab, setActiveTab] = useState<string>("spec");
 
   const partNumber = part.partNumber || `Part #${index + 1}`;
   const partName = part.partName || "Unnamed Part";
-  const totalArea = Number(part.coatingAreaSqIn ?? part.totalSurfaceAreaSqIn) || 0;
+  const totalArea = Number(part.totalSurfaceAreaSqIn) || 0;
+  const rawMasking = Number(part.maskingAreaSqIn) || 0;
+  const maskingSqIn = Math.min(rawMasking, totalArea);
+  const coatingSqIn =
+    part.coatingAreaSqIn != null
+      ? Number(part.coatingAreaSqIn)
+      : Math.max(0, Math.round((totalArea - maskingSqIn) * 100) / 100);
   const quantity = Number(part.quantity) || 1;
 
   // Masking breakdown numbers
@@ -255,7 +266,17 @@ function PartDetailCard({
           ) : null}
           <span className="text-base font-semibold text-foreground">{partName}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {uploadedFiles && uploadedFiles.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenDrawing?.(part.sourceDrawingFile)}
+              className="h-8 gap-1.5 text-xs font-semibold"
+            >
+              <Eye className="size-3.5" /> View Drawing
+            </Button>
+          )}
           <span className="text-sm font-bold tabular-nums text-primary bg-primary/10 px-3 py-1 rounded-md">
             Line Total: {formatMoney(lineTotal)} ({quantity} pcs)
           </span>
@@ -297,13 +318,21 @@ function PartDetailCard({
                   label="Drawing File"
                   editable={false}
                   value={
-                    part.sourceDrawingFile ? (
-                      <span className="flex items-center gap-2">
-                        <span className="font-mono text-sm">{part.sourceDrawingFile}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm font-medium">
+                        {part.sourceDrawingFile || (uploadedFiles[0]?.name ?? "NOT_SPECIFIED")}
                       </span>
-                    ) : (
-                      "NOT_SPECIFIED"
-                    )
+                      {uploadedFiles.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onOpenDrawing?.(part.sourceDrawingFile)}
+                          className="h-6 gap-1 text-xs font-semibold px-2"
+                        >
+                          <Eye className="size-3" /> View Original Drawing
+                        </Button>
+                      )}
+                    </div>
                   }
                 />
                 <Field label="Part Number" value={part.partNumber || "NOT_FOUND"} />
@@ -349,7 +378,7 @@ function PartDetailCard({
                   editable={false}
                   value={
                     <span className="flex items-center gap-2">
-                      <span className="font-semibold">{part.totalSurfaceAreaSqIn} sq in</span>
+                      <span className="font-semibold">{totalArea} sq in</span>
                       {renderConfidenceBadge(part.areaConfidence)}
                     </span>
                   }
@@ -363,11 +392,11 @@ function PartDetailCard({
                 )}
                 <Field
                   label="Coating Area (Sq In)"
-                  value={part.coatingAreaSqIn != null ? `${part.coatingAreaSqIn} sq in` : `${part.totalSurfaceAreaSqIn} sq in`}
+                  value={`${coatingSqIn} sq in`}
                 />
                 <Field
                   label="Masking Area (Sq In)"
-                  value={part.maskingAreaSqIn != null ? `${part.maskingAreaSqIn} sq in` : "0 sq in"}
+                  value={`${maskingSqIn} sq in`}
                 />
                 {part.dimensions?.shapeType ? (
                   <Field
@@ -550,9 +579,11 @@ function PartDetailCard({
 
                 <Separator />
 
-                {/* 5. PRICING SUMMARY (Matching PRD Section 4) */}
-                <div className="rounded-lg border border-border bg-card p-4 shadow-2xs">
-                  <h5 className="mb-3 text-base font-bold text-foreground">Pricing Summary</h5>
+                {/* 5. PRICING SUMMARY (Matching PRD Section 4 - Doubled header font size) */}
+                <div className="rounded-lg border border-border bg-card p-4 sm:p-5 shadow-2xs">
+                  <h4 className="mb-3 text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+                    Pricing Summary
+                  </h4>
                   <div className="grid gap-2 sm:grid-cols-2 divide-y sm:divide-y-0 divide-border/40 text-sm">
                     <div className="space-y-1.5">
                       <div className="flex justify-between py-1 border-b border-border/30">
@@ -681,12 +712,16 @@ export function SectionExtraction({
   focusedSection = "overview",
   onSelectSection,
   extraction,
+  uploadedFiles = [],
+  quoteNumber,
 }: {
   onBack: () => void;
   onContinue: () => void;
   focusedSection?: string;
   onSelectSection?: (section: string) => void;
   extraction?: ExtractionResult | null;
+  uploadedFiles?: File[];
+  quoteNumber?: string;
 }) {
   const [customerOpen, setCustomerOpen] = useState(true);
   const [chemFilmRequested, setChemFilmRequested] = useState(false);
@@ -737,6 +772,28 @@ export function SectionExtraction({
     };
   }, [extraction, chemFilmRequested]);
 
+  const handleOpenDrawing = (drawingName?: string | null) => {
+    if (!uploadedFiles || uploadedFiles.length === 0) return;
+    let targetFile = uploadedFiles[0];
+    if (drawingName) {
+      const match = uploadedFiles.find(
+        (f) =>
+          f.name.toLowerCase() === drawingName.toLowerCase() ||
+          f.name.toLowerCase().includes(drawingName.toLowerCase()) ||
+          drawingName.toLowerCase().includes(f.name.toLowerCase()),
+      );
+      if (match) targetFile = match;
+    }
+    const url = URL.createObjectURL(targetFile);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleExportCsv = () => {
+    if (!extraction?.parts?.length) return;
+    const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
+    downloadOdooCsv(extraction.parts, customer, pricing, `${quoteNumber || "quotation"}_odoo_import.csv`);
+  };
+
   // Determine active part if focused on a specific part ID
   let selectedPartIndex = -1;
   if (focusedSection.startsWith("part-")) {
@@ -750,14 +807,27 @@ export function SectionExtraction({
   const selectedPart = selectedPartIndex >= 0 && selectedPartIndex < parts.length ? parts[selectedPartIndex] : null;
   const selectedPartPricing = selectedPartIndex >= 0 ? pricing?.results[selectedPartIndex] : undefined;
 
-  // Extracted rows for Part Summary table
+  // Extracted rows for Part Summary table with deterministic area & masking logic
   const summaryRows = parts.map((part, index) => {
     const priced = pricing?.results[index];
-    const area = part.coatingAreaSqIn ?? part.totalSurfaceAreaSqIn;
-    const maskingRequired = (part.maskingAreaSqIn ?? 0) > 0;
+    const totalArea = Number(part.totalSurfaceAreaSqIn) || 0;
+    const rawMasking = Number(part.maskingAreaSqIn) || 0;
+    const maskingSqIn = Math.min(rawMasking, totalArea);
+    const coatingSqIn =
+      part.coatingAreaSqIn != null
+        ? Number(part.coatingAreaSqIn)
+        : Math.max(0, Math.round((totalArea - maskingSqIn) * 100) / 100);
+
+    const isMaskingNeeded =
+      (priced?.breakdown?.masking?.cost ?? 0) > 0 ||
+      maskingSqIn > 0 ||
+      Boolean(part.dimensions?.holes && part.dimensions.holes.length > 0);
+
     const workType = part.coatingBom?.topcoat?.toLowerCase().includes("cerakote")
       ? "Cerakote"
       : part.coatingBom?.topcoat || "Coating";
+
+    const displayArea = coatingSqIn > 0 ? coatingSqIn : totalArea;
 
     return {
       id: `part-${index + 1}`,
@@ -768,8 +838,8 @@ export function SectionExtraction({
       summary: part.partSummary || "",
       revision: part.revision || "N/A",
       workType,
-      area: area == null ? "Unknown" : `${area} sq in`,
-      pricePerSqIn: area == null ? "Unknown" : maskingRequired ? "$0.46" : "$0.40",
+      area: displayArea === 0 ? "Unknown" : `${displayArea} sq in`,
+      pricePerSqIn: displayArea === 0 ? "Unknown" : isMaskingNeeded ? "$0.46" : "$0.40",
       pricePerUnit: priced?.priced ? formatMoney(priced.pricePerUnit ?? 0) : "Pending",
       qty: part.quantity != null ? String(part.quantity) : "1",
       total: priced?.priced ? formatMoney(priced.totalLineItem ?? 0) : "Pending",
@@ -794,32 +864,56 @@ export function SectionExtraction({
           ) : null}
         </div>
 
-        {/* Submenu Quick Navigation Toggles */}
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-muted/40 p-1">
-          <Button
-            variant={focusedSection === "overview" || !focusedSection ? "default" : "ghost"}
-            size="sm"
-            onClick={() => onSelectSection?.("overview")}
-            className="h-8 gap-1.5 text-xs font-semibold"
-          >
-            <Layers className="size-3.5" /> Overview
-          </Button>
-          <Button
-            variant={focusedSection === "customer" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => onSelectSection?.("customer")}
-            className="h-8 gap-1.5 text-xs font-semibold"
-          >
-            <User className="size-3.5" /> Customer Info
-          </Button>
-          <Button
-            variant={focusedSection === "summary" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => onSelectSection?.("summary")}
-            className="h-8 gap-1.5 text-xs font-semibold"
-          >
-            <TableProperties className="size-3.5" /> Part Summary
-          </Button>
+        {/* Submenu Quick Navigation Toggles + Global Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {uploadedFiles && uploadedFiles.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenDrawing()}
+              className="h-8 gap-1.5 text-xs font-semibold"
+            >
+              <Eye className="size-3.5" /> View Original Drawing{uploadedFiles.length > 1 ? "s" : ""}
+            </Button>
+          )}
+
+          {parts.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCsv}
+              className="h-8 gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-500/10"
+            >
+              <FileSpreadsheet className="size-3.5" /> Export Odoo CSV
+            </Button>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-muted/40 p-1">
+            <Button
+              variant={focusedSection === "overview" || !focusedSection ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onSelectSection?.("overview")}
+              className="h-8 gap-1.5 text-xs font-semibold"
+            >
+              <Layers className="size-3.5" /> Overview
+            </Button>
+            <Button
+              variant={focusedSection === "customer" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onSelectSection?.("customer")}
+              className="h-8 gap-1.5 text-xs font-semibold"
+            >
+              <User className="size-3.5" /> Customer Info
+            </Button>
+            <Button
+              variant={focusedSection === "summary" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onSelectSection?.("summary")}
+              className="h-8 gap-1.5 text-xs font-semibold"
+            >
+              <TableProperties className="size-3.5" /> Part Summary
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -842,6 +936,8 @@ export function SectionExtraction({
           index={selectedPartIndex}
           pricing={selectedPartPricing}
           extractionNotes={extraction?.extractionNotes}
+          uploadedFiles={uploadedFiles}
+          onOpenDrawing={handleOpenDrawing}
           onBackToSummary={() => onSelectSection?.("summary")}
         />
       ) : (
@@ -905,9 +1001,19 @@ export function SectionExtraction({
                     PART SUMMARY
                   </h2>
                 </div>
-                <Badge variant="outline" className="border-white/30 bg-white/10 text-xs text-white">
-                  {summaryRows.length} Line Item{summaryRows.length === 1 ? "" : "s"} extracted
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportCsv}
+                    className="border-white/30 bg-white/10 text-white hover:bg-white/20 h-7 text-xs font-semibold gap-1.5"
+                  >
+                    <FileSpreadsheet className="size-3.5" /> Export Odoo CSV
+                  </Button>
+                  <Badge variant="outline" className="border-white/30 bg-white/10 text-xs text-white">
+                    {summaryRows.length} Line Item{summaryRows.length === 1 ? "" : "s"} extracted
+                  </Badge>
+                </div>
               </div>
 
               <CardContent className="p-0">

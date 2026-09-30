@@ -37,6 +37,7 @@ backend/*.pdf
 !.vscode/extensions.json
 .idea
 .DS_Store
+.gemini
 *.suo
 *.ntvs*
 *.njsproj

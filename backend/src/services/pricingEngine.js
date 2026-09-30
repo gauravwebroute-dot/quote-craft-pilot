@@ -38,16 +38,19 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     holesCount = part.dimensions.holeCount;
   }
 
-  // --- 1. Masking ---
+  // --- 1. Masking (PRD v2 Item 2) ---
   const maskingRate = rc.masking?.ratePerSqIn ?? 0.06;
-  const maskingCost = round2(totalArea * maskingRate);
+  const isMaskingNeeded = maskedArea > 0 || holesCount > 0;
+  const maskingCost = isMaskingNeeded ? round2(totalArea * maskingRate) : 0;
   const masking = {
     totalArea: round2(totalArea),
     maskedArea: round2(maskedArea),
     holes: holesCount,
     holesDescription: rc.masking?.defaultHoleDescription || "less than 1\" dia",
     cost: maskingCost,
-    rateText: `+$${maskingRate.toFixed(2)} per SI of total area`,
+    rateText: isMaskingNeeded
+      ? `+$${maskingRate.toFixed(2)} per SI of total area`
+      : "$0.00 (no masking required)",
     unitCostText: `$${maskingCost.toFixed(2)} (unit)`,
   };
 

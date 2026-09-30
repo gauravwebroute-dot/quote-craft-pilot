@@ -95,13 +95,13 @@ change. This will stay true even with a visible reference object, since a refere
 only helps estimate overall size, not how much a folded/bent shape's true surface differs
 from its bounding box.
 
-## Test-phase scoping: MAD Custom-Coating only
+## Test-phase scoping: OC Custom Coating only
 
 While the RFQ → Odoo pipeline is being validated, every live read and write is forced to
-a single Odoo company - **"MAD Custom-Coating"** - never Maverick or OC. This is enforced
-in code (`resolveTestCompanyId` in `odooCrossCheck.js`), not left as a convention to
-remember: if that company name isn't found in Odoo, cross-check/create fail loudly rather
-than silently reading/writing across every company.
+a single Odoo company - **"OC Custom Coating"** - configured in code (`resolveTestCompanyId`
+in `odooCrossCheck.js`), not left as a convention to remember: if that company name isn't
+found in Odoo, cross-check/create fail loudly rather than silently reading/writing across
+every company.
 
 Every quotation created also gets tagged **"+temp test"** (Odoo `crm.tag`, found or
 created automatically), and each order line's description follows the exact format:

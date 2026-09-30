@@ -56,6 +56,12 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
         const resolvedMethod = part.estimationMethod || areaResult.method;
         const resolvedReasoning = part.reasoningSummary || areaResult.reasoningSummary;
 
+        // Deterministic surface, masking & coating area enforcement (PRD v2 Item 1)
+        const totalSurfaceArea = typeof resolvedArea === "number" && !isNaN(resolvedArea) ? resolvedArea : 0;
+        const rawMasking = part.maskingAreaSqIn != null ? Number(part.maskingAreaSqIn) : 0;
+        const maskingAreaSqIn = isNaN(rawMasking) || rawMasking < 0 ? 0 : Math.min(rawMasking, totalSurfaceArea);
+        const coatingAreaSqIn = Math.max(0, Math.min(totalSurfaceArea, Math.round((totalSurfaceArea - maskingAreaSqIn) * 100) / 100));
+
         // 2. Coating Detection & Negation Handling
         const searchScope = `${emailText} ${part.partSummary || ""} ${JSON.stringify(part.coatingBom || {})}`.toUpperCase();
         const hasExplicitNegation =
@@ -108,7 +114,9 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
           existingCoating,
           partMarkSpec,
           coatingPresent,
-          totalSurfaceAreaSqIn: resolvedArea,
+          totalSurfaceAreaSqIn: totalSurfaceArea,
+          coatingAreaSqIn,
+          maskingAreaSqIn,
           areaConfidence: resolvedConfidence,
           estimationMethod: resolvedMethod,
           reasoningSummary: resolvedReasoning,

@@ -22,10 +22,10 @@ import { crossCheckOdoo, odooAuth, odooCall, isLiveConfigured, resolveTestCompan
  * state pushing a duplicate through.
  *
  * TEST-PHASE SCOPING: every live write is forced under the
- * TEST_COMPANY_NAME company (currently "MAD Custom-Coating") and tagged
+ * TEST_COMPANY_NAME company (currently "OC Custom Coating") and tagged
  * with TEST_TAG_NAME (currently "+temp test") - both hardcoded here, not
  * left to whatever the caller passes in, so nothing this file creates can
- * accidentally land under Maverick or OC while this is still being
+ * accidentally land under other companies while this is still being
  * validated.
  * ============================================================================
  */

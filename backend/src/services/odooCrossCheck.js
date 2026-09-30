@@ -16,7 +16,7 @@ import { DEFAULT_RATE_CARD } from "../config/rateCard.js";
  * forgotten, a filter in code can't.
  */
 
-export const TEST_COMPANY_NAME = "MAD Custom-Coating";
+export const TEST_COMPANY_NAME = "OC Custom Coating";
 export const TEST_TAG_NAME = "+temp test";
 
 const DUMMY_CUSTOMERS = [
