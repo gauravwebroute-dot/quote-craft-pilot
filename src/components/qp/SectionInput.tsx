@@ -12,7 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles, AlertTriangle, CopyCheck, PlusSquare } from "lucide-react";
 
 const emailBody = `Hi,
 Could we please get pricing for the attached items? The qty will be 6 each.
@@ -106,10 +114,23 @@ const DEFAULT_MODELS: ModelOption[] = [
   },
 ];
 
+type DuplicateInfo = {
+  quoteNumber: string;
+  customerName: string;
+  quoteId?: number | string;
+  revisionCount?: number;
+};
+
 export function SectionInput({
   onRun,
+  currentDraftId,
+  businessUnit = "OC Custom Coating",
+  onBusinessUnitChange,
 }: {
-  onRun: (extraction: ExtractionResult, files: File[]) => void;
+  onRun: (extraction: ExtractionResult, files: File[], duplicateAction?: "revision" | "new" | null) => void;
+  currentDraftId?: string;
+  businessUnit?: string;
+  onBusinessUnitChange?: (bu: string) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -117,9 +138,15 @@ export function SectionInput({
   const [emailText, setEmailText] = useState(emailBody);
   const [models, setModels] = useState<ModelOption[]>(DEFAULT_MODELS);
   const [selectedModel, setSelectedModel] = useState("~google/gemini-flash-latest");
+  const [selectedBU, setSelectedBU] = useState(businessUnit || "OC Custom Coating");
   const [isExtracting, setIsExtracting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Duplicate Warning Modal State (REQ-003, REQ-004)
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
+  const [duplicateData, setDuplicateData] = useState<DuplicateInfo | null>(null);
+  const [pendingExtractionPayload, setPendingExtractionPayload] = useState<ExtractionResult | null>(null);
 
   // Fetch dynamic models from OpenRouter endpoint on mount
   useEffect(() => {
@@ -141,7 +168,6 @@ export function SectionInput({
           const data = await res.json();
           if (Array.isArray(data?.models) && data.models.length > 0 && !cancelled) {
             setModels(data.models);
-            // If current model not available, fallback to default
             const exists = data.models.some((m: ModelOption) => m.id === selectedModel);
             if (!exists) {
               const def = data.models.find((m: ModelOption) => m.isDefault)?.id || data.models[0].id;
@@ -162,19 +188,6 @@ export function SectionInput({
     };
   }, []);
 
-  const addFiles = (selectedFiles: FileList | File[]) => {
-    const validFiles = Array.from(selectedFiles).filter(
-      (file) =>
-        ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
-        file.size <= 20 * 1024 * 1024,
-    );
-    setUploadedFiles((current) => [...current, ...validFiles].slice(0, 10));
-  };
-
-  const openFile = (file: File) => {
-    window.open(URL.createObjectURL(file), "_blank", "noopener,noreferrer");
-  };
-
   const computePdfHash = async (files: File[]) => {
     if (!files.length) return null;
     const file = files[0];
@@ -183,6 +196,185 @@ export function SectionInput({
     return Array.from(new Uint8Array(digest))
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
+  };
+
+  const addFiles = async (selectedFiles: FileList | File[]) => {
+    const validFiles = Array.from(selectedFiles).filter(
+      (file) =>
+        ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
+        file.size <= 20 * 1024 * 1024,
+    );
+    const newFiles = [...uploadedFiles, ...validFiles].slice(0, 10);
+    setUploadedFiles(newFiles);
+
+    // Pre-check duplicate on file upload
+    if (newFiles.length > 0) {
+      try {
+        const hash = await computePdfHash(newFiles);
+        if (hash) {
+          const apiUrl = (
+            import.meta.env["VITE_EXTRACTION_API_URL"] ||
+            (typeof window !== "undefined" &&
+            (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+              ? "http://localhost:4000"
+              : "https://quote-craft-pilot.onrender.com")
+          ).replace(/\/$/, "");
+
+          const res = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pdfHash: hash, sourceFile: newFiles[0]?.name }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.duplicate) {
+              setDuplicateData({
+                quoteNumber: data.quoteNumber || data.quote?.draftSequenceId || "QP26-0001",
+                customerName: data.customerName || data.quote?.customerName || "ABC Metal Works",
+                quoteId: data.quote?.id,
+                revisionCount: data.quote?.revisionCount || 1,
+              });
+              setDuplicateModalOpen(true);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Pre-upload duplicate check failed:", err);
+      }
+    }
+  };
+
+  const openFile = (file: File) => {
+    window.open(URL.createObjectURL(file), "_blank", "noopener,noreferrer");
+  };
+
+  const executeExtraction = async (forceNewQuote = false) => {
+    setError(null);
+    setIsExtracting(true);
+    try {
+      const formData = new FormData();
+      uploadedFiles.forEach((file) => formData.append("files", file));
+      if (emailText.trim()) formData.append("emailText", emailText.trim());
+      formData.append("model", selectedModel);
+      const apiUrl = (
+        import.meta.env["VITE_EXTRACTION_API_URL"] ||
+        (typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1")
+          ? "http://localhost:4000"
+          : "https://quote-craft-pilot.onrender.com")
+      ).replace(/\/$/, "");
+
+      const response = await fetch(`${apiUrl}/api/extract`, {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "Extraction failed.");
+
+      const pdfHash = await computePdfHash(uploadedFiles);
+
+      // Check duplicate on extraction payload
+      if (!forceNewQuote && pdfHash) {
+        const duplicateResponse = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pdfHash,
+            sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
+            customer: payload.extraction.customer,
+            parts: payload.extraction.parts,
+          }),
+        });
+        const duplicatePayload = await duplicateResponse.json();
+        if (duplicatePayload.duplicate) {
+          setDuplicateData({
+            quoteNumber: duplicatePayload.quoteNumber || duplicatePayload.quote?.draftSequenceId || "QP26-0001",
+            customerName: duplicatePayload.customerName || duplicatePayload.quote?.customerName || "ABC Metal Works",
+            quoteId: duplicatePayload.quote?.id,
+            revisionCount: duplicatePayload.quote?.revisionCount || 1,
+          });
+          setPendingExtractionPayload(payload.extraction);
+          setDuplicateModalOpen(true);
+          setIsExtracting(false);
+          return;
+        }
+      }
+
+      // Save quote record into DB
+      await fetch(`${apiUrl}/api/quotes/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draftSequenceId: currentDraftId,
+          businessUnit: selectedBU,
+          customer: payload.extraction.customer,
+          parts: payload.extraction.parts,
+          pdfHash,
+          sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
+          formPayload: payload.extraction,
+          status: "EXTRACTED",
+          forceNewQuote,
+        }),
+      });
+
+      onRun(payload.extraction, uploadedFiles, forceNewQuote ? "new" : null);
+    } catch (requestError) {
+      setError(
+        requestError instanceof TypeError
+          ? "Unable to reach the extraction service. Please refresh the page and try again."
+          : requestError instanceof Error
+            ? requestError.message
+            : "Extraction failed.",
+      );
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Duplicate Warning Modal Actions (PRD Section 4.2)
+  const handleModalCreateRevision = async () => {
+    setDuplicateModalOpen(false);
+    if (pendingExtractionPayload) {
+      const apiUrl = (
+        import.meta.env["VITE_EXTRACTION_API_URL"] ||
+        (typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+          ? "http://localhost:4000"
+          : "https://quote-craft-pilot.onrender.com")
+      ).replace(/\/$/, "");
+
+      const pdfHash = await computePdfHash(uploadedFiles);
+      await fetch(`${apiUrl}/api/quotes/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draftSequenceId: duplicateData?.quoteNumber,
+          businessUnit: selectedBU,
+          customer: pendingExtractionPayload.customer,
+          parts: pendingExtractionPayload.parts,
+          pdfHash,
+          sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
+          formPayload: pendingExtractionPayload,
+          status: "EXTRACTED",
+          forceNewQuote: false,
+        }),
+      });
+
+      onRun(pendingExtractionPayload, uploadedFiles, "revision");
+    }
+  };
+
+  const handleModalCreateNewQuote = async () => {
+    setDuplicateModalOpen(false);
+    await executeExtraction(true);
+  };
+
+  const handleModalCancel = () => {
+    setDuplicateModalOpen(false);
+    setUploadedFiles([]);
+    setPendingExtractionPayload(null);
+    setDuplicateData(null);
   };
 
   return (
@@ -323,14 +515,20 @@ export function SectionInput({
           </div>
           <div className="space-y-2">
             <Label>Business Unit</Label>
-            <Select defaultValue="oc">
+            <Select
+              value={selectedBU}
+              onValueChange={(val) => {
+                setSelectedBU(val);
+                onBusinessUnitChange?.(val);
+              }}
+            >
               <SelectTrigger className="w-full sm:w-80">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="oc">OC Custom Coating</SelectItem>
-                <SelectItem value="mad">MAD Custom-Coating</SelectItem>
-                <SelectItem value="maverick">Maverick Powder Coating</SelectItem>
+                <SelectItem value="OC Custom Coating">OC Custom Coating</SelectItem>
+                <SelectItem value="MAD Custom-Coating">MAD Custom-Coating</SelectItem>
+                <SelectItem value="Maverick Powder Coating">Maverick Powder Coating</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -383,83 +581,63 @@ export function SectionInput({
             <Button
               size="lg"
               disabled={isExtracting}
-              onClick={async () => {
-                setError(null);
-                setIsExtracting(true);
-                try {
-                  const formData = new FormData();
-                  uploadedFiles.forEach((file) => formData.append("files", file));
-                  if (emailText.trim()) formData.append("emailText", emailText.trim());
-                  formData.append("model", selectedModel);
-                  const apiUrl = (
-                    import.meta.env["VITE_EXTRACTION_API_URL"] ||
-                    (typeof window !== "undefined" &&
-                    (window.location.hostname === "localhost" ||
-                      window.location.hostname === "127.0.0.1")
-                      ? "http://localhost:4000"
-                      : "https://quote-craft-pilot.onrender.com")
-                  ).replace(/\/$/, "");
-                  const response = await fetch(`${apiUrl}/api/extract`, {
-                    method: "POST",
-                    body: formData,
-                  });
-                  const payload = await response.json();
-                  if (!response.ok) throw new Error(payload.message || "Extraction failed.");
-
-                  const pdfHash = await computePdfHash(uploadedFiles);
-                  if (pdfHash) {
-                    const duplicateResponse = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        pdfHash,
-                        sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
-                        customer: payload.extraction.customer,
-                        parts: payload.extraction.parts,
-                      }),
-                    });
-                    const duplicatePayload = await duplicateResponse.json();
-                    if (duplicatePayload.duplicate) {
-                      setError(duplicatePayload.warning || "Duplicate PDF detected.");
-                    }
-                  }
-
-                  const quoteStoreResponse = await fetch(`${apiUrl}/api/quotes/save`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      quoteNumber: undefined,
-                      customer: payload.extraction.customer,
-                      parts: payload.extraction.parts,
-                      pdfHash,
-                      sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
-                      payload: payload.extraction,
-                    }),
-                  });
-                  if (!quoteStoreResponse.ok) {
-                    console.warn("Quote history save failed.");
-                  }
-
-                  onRun(payload.extraction, uploadedFiles);
-                } catch (requestError) {
-                  setError(
-                    requestError instanceof TypeError
-                      ? "Unable to reach the extraction service. Please refresh the page and try again. If this continues, the deployed app origin may need to be added to the backend CORS settings."
-                      : requestError instanceof Error
-                        ? requestError.message
-                        : "Extraction failed.",
-                  );
-                } finally {
-                  setIsExtracting(false);
-                }
-              }}
+              onClick={() => executeExtraction(false)}
             >
               {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      {/* Duplicate Warning Modal (REQ-004, Section 4.2) */}
+      <Dialog open={duplicateModalOpen} onOpenChange={setDuplicateModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="size-5" />
+              <DialogTitle className="text-lg font-bold">Duplicate Drawing Detected</DialogTitle>
+            </div>
+            <DialogDescription className="pt-2 text-foreground font-medium text-sm">
+              This PDF document has already been processed under Quote #{duplicateData?.quoteNumber || "QP26-0001"} (Customer: {duplicateData?.customerName || "ABC Metal Works"}). Select how you would like to proceed:
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3 py-3">
+            <Button
+              variant="default"
+              onClick={handleModalCreateRevision}
+              className="justify-start gap-2 h-auto py-2.5 bg-[#1B4332] text-white hover:bg-[#1B4332]/90"
+            >
+              <CopyCheck className="size-4 shrink-0" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">Create Revision (v{(duplicateData?.revisionCount || 1) + 1})</div>
+                <div className="text-xs opacity-90">Links current session to existing quote parent, incrementing revision tag.</div>
+              </div>
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={handleModalCreateNewQuote}
+              className="justify-start gap-2 h-auto py-2.5 border-[#374151]"
+            >
+              <PlusSquare className="size-4 shrink-0 text-primary" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">Create New Quote</div>
+                <div className="text-xs text-muted-foreground">Bypasses duplicate linking, assigns next available sequence ID.</div>
+              </div>
+            </Button>
+
+            <Button
+              variant="ghost"
+              onClick={handleModalCancel}
+              className="justify-start gap-2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-4 shrink-0" />
+              <span>Cancel (Abort upload)</span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

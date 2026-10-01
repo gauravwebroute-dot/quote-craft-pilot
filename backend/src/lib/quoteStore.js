@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +7,9 @@ import { DatabaseSync } from 'node:sqlite';
 const DEFAULT_DB_PATH = fileURLToPath(new URL('../../data/quotepilot.sqlite', import.meta.url));
 
 export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
-  mkdirSync(dirname(dbPath), { recursive: true });
+  if (dbPath !== ':memory:') {
+    mkdirSync(dirname(dbPath), { recursive: true });
+  }
 
   const db = new DatabaseSync(dbPath);
   db.exec(`
@@ -15,56 +17,130 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     PRAGMA journal_mode = WAL;
 
     CREATE TABLE IF NOT EXISTS quote_counters (
-      scope TEXT PRIMARY KEY,
-      sequence INTEGER NOT NULL DEFAULT 0
+      year TEXT PRIMARY KEY,
+      last_sequence INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS quotes (
-      quote_id TEXT PRIMARY KEY,
-      quote_number TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL,
-      customer_json TEXT,
-      parts_json TEXT,
-      pdf_hash TEXT,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      draft_sequence_id VARCHAR(20) UNIQUE NOT NULL,
+      odoo_sequence_id VARCHAR(30),
+      business_unit VARCHAR(100) NOT NULL DEFAULT 'OC Custom Coating',
+      customer_name VARCHAR(255) NOT NULL,
+      customer_email VARCHAR(255),
+      pdf_sha256 CHAR(64),
       source_file TEXT,
-      payload_json TEXT,
-      status TEXT NOT NULL DEFAULT 'active'
+      form_payload TEXT NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS quote_line_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+      part_number VARCHAR(100),
+      description TEXT,
+      revision VARCHAR(20),
+      work_type VARCHAR(50),
+      sq_in_per_unit REAL,
+      price_per_si REAL,
+      price_unit REAL,
+      quantity REAL,
+      total_price REAL
     );
 
     CREATE TABLE IF NOT EXISTS quote_revisions (
       revision_id TEXT PRIMARY KEY,
-      quote_id TEXT NOT NULL,
+      quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
       revision_label TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      FOREIGN KEY (quote_id) REFERENCES quotes (quote_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS quote_hashes (
-      pdf_hash TEXT PRIMARY KEY,
-      quote_id TEXT NOT NULL,
-      quote_number TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      source_file TEXT,
-      FOREIGN KEY (quote_id) REFERENCES quotes (quote_id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      payload_json TEXT NOT NULL
     );
   `);
 
-  function nextQuoteSequence() {
-    const row = db.prepare('SELECT sequence FROM quote_counters WHERE scope = ?').get('quote');
-    const nextSequence = row ? Number(row.sequence) + 1 : 1;
-    if (row) {
-      db.prepare('UPDATE quote_counters SET sequence = ? WHERE scope = ?').run(nextSequence, 'quote');
-    } else {
-      db.prepare('INSERT INTO quote_counters (scope, sequence) VALUES (?, ?)').run('quote', nextSequence);
+  // Migrate older quotes table if needed
+  try {
+    const tableInfo = db.prepare('PRAGMA table_info(quotes)').all();
+    const colNames = new Set(tableInfo.map((c) => c.name));
+
+    if (!colNames.has('draft_sequence_id') && colNames.has('quote_number')) {
+      // Legacy table structure migration
+      db.exec(`
+        ALTER TABLE quotes ADD COLUMN draft_sequence_id VARCHAR(20);
+        UPDATE quotes SET draft_sequence_id = quote_number WHERE draft_sequence_id IS NULL;
+      `);
     }
-    return nextSequence;
+    if (!colNames.has('business_unit')) {
+      db.exec(`ALTER TABLE quotes ADD COLUMN business_unit VARCHAR(100) DEFAULT 'OC Custom Coating';`);
+    }
+    if (!colNames.has('customer_name') && colNames.has('customer_json')) {
+      db.exec(`ALTER TABLE quotes ADD COLUMN customer_name VARCHAR(255) DEFAULT 'Standard Customer';`);
+    }
+    if (!colNames.has('customer_email')) {
+      db.exec(`ALTER TABLE quotes ADD COLUMN customer_email VARCHAR(255);`);
+    }
+    if (!colNames.has('pdf_sha256')) {
+      if (colNames.has('pdf_hash')) {
+        db.exec(`
+          ALTER TABLE quotes ADD COLUMN pdf_sha256 CHAR(64);
+          UPDATE quotes SET pdf_sha256 = pdf_hash WHERE pdf_sha256 IS NULL;
+        `);
+      } else {
+        db.exec(`ALTER TABLE quotes ADD COLUMN pdf_sha256 CHAR(64);`);
+      }
+    }
+    if (!colNames.has('form_payload') && colNames.has('payload_json')) {
+      db.exec(`
+        ALTER TABLE quotes ADD COLUMN form_payload TEXT;
+        UPDATE quotes SET form_payload = payload_json WHERE form_payload IS NULL;
+      `);
+    }
+    if (!colNames.has('odoo_sequence_id')) {
+      db.exec(`ALTER TABLE quotes ADD COLUMN odoo_sequence_id VARCHAR(30);`);
+    }
+    if (!colNames.has('updated_at')) {
+      db.exec(`ALTER TABLE quotes ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
+    }
+  } catch (migErr) {
+    console.warn('Migration check note:', migErr.message);
   }
 
-  function issueQuoteNumber() {
-    const year = new Date().getFullYear().toString().slice(-2);
-    const sequence = nextQuoteSequence();
-    return `QP${year}-${String(sequence).padStart(4, '0')}`;
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_quotes_pdf_sha256 ON quotes(pdf_sha256);
+      CREATE INDEX IF NOT EXISTS idx_quotes_draft_seq ON quotes(draft_sequence_id);
+      CREATE INDEX IF NOT EXISTS idx_quotes_odoo_seq ON quotes(odoo_sequence_id);
+    `);
+  } catch (idxErr) {
+    console.warn('Index creation note:', idxErr.message);
+  }
+
+  function getCurrentYearStr() {
+    return new Date().getFullYear().toString().slice(-2);
+  }
+
+  function getNextDraftSequenceId(year = getCurrentYearStr()) {
+    const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
+    const nextSeq = (row ? Number(row.last_sequence) : 0) + 1;
+    return `QP${year}-${String(nextSeq).padStart(4, '0')}`;
+  }
+
+  function getCurrentDraftSequenceId(year = getCurrentYearStr()) {
+    const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
+    const nextSeq = (row ? Number(row.last_sequence) : 0) + 1;
+    return `QP${year}-${String(nextSeq).padStart(4, '0')}`;
+  }
+
+  function advanceSequenceCounter(year = getCurrentYearStr()) {
+    const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
+    const nextSeq = (row ? Number(row.last_sequence) : 0) + 1;
+    if (row) {
+      db.prepare('UPDATE quote_counters SET last_sequence = ? WHERE year = ?').run(nextSeq, year);
+    } else {
+      db.prepare('INSERT INTO quote_counters (year, last_sequence) VALUES (?, ?)').run(year, nextSeq);
+    }
+    return `QP${year}-${String(nextSeq).padStart(4, '0')}`;
   }
 
   function normalizePayload(payload) {
@@ -80,139 +156,391 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     if (!pdfHash) return null;
     const row = db
       .prepare(`
-        SELECT q.quote_id, q.quote_number, q.created_at, q.customer_json, q.parts_json, q.source_file, q.payload_json
-        FROM quote_hashes h
-        JOIN quotes q ON q.quote_id = h.quote_id
-        WHERE h.pdf_hash = ?
+        SELECT q.id, q.draft_sequence_id, q.odoo_sequence_id, q.business_unit,
+               q.customer_name, q.customer_email, q.pdf_sha256, q.source_file,
+               q.form_payload, q.status, q.created_at, q.updated_at,
+               (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.id) as revision_count
+        FROM quotes q
+        WHERE q.pdf_sha256 = ?
         ORDER BY q.created_at DESC
         LIMIT 1
       `)
       .get(pdfHash);
 
     if (!row) return null;
+
+    const lineItems = db
+      .prepare('SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY id ASC')
+      .all(row.id);
+
     return {
-      quoteId: row.quote_id,
-      quoteNumber: row.quote_number,
-      createdAt: row.created_at,
-      customer: normalizePayload(row.customer_json),
-      parts: normalizePayload(row.parts_json),
+      id: row.id,
+      draftSequenceId: row.draft_sequence_id || `QP${getCurrentYearStr()}-0001`,
+      quoteNumber: row.draft_sequence_id || `QP${getCurrentYearStr()}-0001`,
+      odooSequenceId: row.odoo_sequence_id,
+      businessUnit: row.business_unit || 'OC Custom Coating',
+      customerName: row.customer_name || 'Standard Customer',
+      customerEmail: row.customer_email,
+      pdfHash: row.pdf_sha256,
       sourceFile: row.source_file,
-      payload: normalizePayload(row.payload_json),
+      status: row.status || 'DRAFT',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      revisionCount: Number(row.revision_count || 1),
+      formPayload: normalizePayload(row.form_payload),
+      lineItems,
     };
   }
 
   function recordRevision({ quoteId, payload, revisionLabel }) {
     const revisionId = randomUUID();
+    const now = new Date().toISOString();
     db.prepare(
       'INSERT INTO quote_revisions (revision_id, quote_id, revision_label, created_at, payload_json) VALUES (?, ?, ?, ?, ?)',
-    ).run(revisionId, quoteId, revisionLabel, new Date().toISOString(), JSON.stringify(payload ?? {}));
+    ).run(revisionId, quoteId, revisionLabel, now, JSON.stringify(payload ?? {}));
 
     return {
       revisionId,
       quoteId,
       revisionLabel,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     };
   }
 
-  function recordQuote({ quoteNumber, customer, parts, pdfHash, sourceFile, payload }) {
-    const normalizedHash = pdfHash || createHash('sha256').update(JSON.stringify({ customer, parts, sourceFile })).digest('hex');
-    const previous = findDuplicateQuoteByHash(normalizedHash);
+  function recordQuote({
+    draftSequenceId,
+    odooSequenceId = null,
+    businessUnit = 'OC Custom Coating',
+    customer = {},
+    parts = [],
+    pdfHash = null,
+    sourceFile = null,
+    formPayload = null,
+    status = 'DRAFT',
+    forceNewQuote = false,
+  }) {
+    const customerName = customer?.company || customer?.name || customer?.contact || 'Standard Customer';
+    const customerEmail = customer?.email || null;
+    const fullPayload = formPayload || { customer, parts, sourceFile };
+    const normalizedHash = pdfHash || createHash('sha256').update(JSON.stringify(fullPayload)).digest('hex');
 
-    if (previous) {
-      const nextVersion = (
-        db
-          .prepare('SELECT COALESCE(MAX(CAST(substr(revision_label, 2) AS INTEGER)), 0) as last_version FROM quote_revisions WHERE quote_id = ?')
-          .get(previous.quoteId)?.last_version || 0
-      ) + 1;
-      const revisionLabel = `v${nextVersion}`;
-      const revision = recordRevision({ quoteId: previous.quoteId, payload: payload ?? { customer, parts }, revisionLabel });
-      return {
-        duplicate: true,
-        quoteId: previous.quoteId,
-        quoteNumber: previous.quoteNumber,
-        revision,
-        warning: `Warning: This PDF document has already been processed under Quote #${previous.quoteNumber}. You are creating a new revision (${revisionLabel}) for this same document.`,
-      };
+    // Duplicate check if not forced
+    if (!forceNewQuote && pdfHash) {
+      const previous = findDuplicateQuoteByHash(normalizedHash);
+      if (previous) {
+        const nextRevNum = (
+          db
+            .prepare('SELECT COALESCE(MAX(CAST(substr(revision_label, 2) AS INTEGER)), 0) as last_rev FROM quote_revisions WHERE quote_id = ?')
+            .get(previous.id)?.last_rev || 1
+        ) + 1;
+        const revisionLabel = `v${nextRevNum}`;
+        const revision = recordRevision({
+          quoteId: previous.id,
+          payload: fullPayload,
+          revisionLabel,
+        });
+
+        // Update quote timestamp and payload
+        db.prepare(`
+          UPDATE quotes
+          SET form_payload = ?, updated_at = CURRENT_TIMESTAMP,
+              customer_name = ?, customer_email = ?, business_unit = ?
+          WHERE id = ?
+        `).run(JSON.stringify(fullPayload), customerName, customerEmail, businessUnit, previous.id);
+
+        return {
+          duplicate: true,
+          id: previous.id,
+          draftSequenceId: previous.draftSequenceId,
+          quoteNumber: previous.draftSequenceId,
+          odooSequenceId: previous.odooSequenceId,
+          status: previous.status,
+          revision,
+          warning: `This PDF document has already been processed under Quote #${previous.draftSequenceId} (Customer: ${previous.customerName}).`,
+        };
+      }
     }
 
-    const safeQuoteNumber = quoteNumber || issueQuoteNumber();
-    const quoteId = randomUUID();
-    const createdAt = new Date().toISOString();
-    db.prepare(
-      'INSERT INTO quotes (quote_id, quote_number, created_at, customer_json, parts_json, pdf_hash, source_file, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(
-      quoteId,
-      safeQuoteNumber,
-      createdAt,
-      JSON.stringify(customer ?? {}),
-      JSON.stringify(parts ?? []),
+    const yearStr = getCurrentYearStr();
+    let assignedDraftId = draftSequenceId;
+    if (!assignedDraftId) {
+      assignedDraftId = advanceSequenceCounter(yearStr);
+    } else {
+      // Ensure counter tracks this sequence
+      const seqPart = parseInt(assignedDraftId.split('-')[1] || '0', 10);
+      const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(yearStr);
+      if (!row || Number(row.last_sequence) < seqPart) {
+        if (row) {
+          db.prepare('UPDATE quote_counters SET last_sequence = ? WHERE year = ?').run(seqPart, yearStr);
+        } else {
+          db.prepare('INSERT INTO quote_counters (year, last_sequence) VALUES (?, ?)').run(yearStr, seqPart);
+        }
+      }
+    }
+
+    const now = new Date().toISOString();
+    const insertQuote = db.prepare(`
+      INSERT INTO quotes (
+        draft_sequence_id, odoo_sequence_id, business_unit, customer_name,
+        customer_email, pdf_sha256, source_file, form_payload, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = insertQuote.run(
+      assignedDraftId,
+      odooSequenceId,
+      businessUnit,
+      customerName,
+      customerEmail,
       normalizedHash,
       sourceFile || null,
-      JSON.stringify(payload ?? { customer: customer ?? {}, parts: parts ?? [] }),
+      JSON.stringify(fullPayload),
+      status,
+      now,
+      now,
     );
 
-    db.prepare(
-      'INSERT INTO quote_hashes (pdf_hash, quote_id, quote_number, created_at, source_file) VALUES (?, ?, ?, ?, ?)',
-    ).run(normalizedHash, quoteId, safeQuoteNumber, createdAt, sourceFile || null);
+    const quoteId = Number(result.lastInsertRowid);
 
-    const revision = recordRevision({ quoteId, payload: payload ?? { customer: customer ?? {}, parts: parts ?? [] }, revisionLabel: 'v1' });
+    // Insert line items
+    if (Array.isArray(parts) && parts.length > 0) {
+      const insertLine = db.prepare(`
+        INSERT INTO quote_line_items (
+          quote_id, part_number, description, revision, work_type,
+          sq_in_per_unit, price_per_si, price_unit, quantity, total_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const part of parts) {
+        const sqIn = Number(part.totalSurfaceAreaSqIn || part.sq_in_per_unit || 0);
+        const qty = Number(part.quantity || part.product_uom_qty || 1);
+        const pricePerSi = Number(part.pricePerSi || part.price_per_si || (part.isMaskingNeeded ? 0.46 : 0.40));
+        const unitPrice = Number(part.priceUnit || part.price_unit || (sqIn > 0 ? (sqIn * pricePerSi).toFixed(2) : 5.0));
+        const totalPrice = Number(part.totalPrice || part.total_price || (unitPrice * qty).toFixed(2));
+
+        insertLine.run(
+          quoteId,
+          part.partNumber || part.part_number || null,
+          part.partName || part.description || part.partSummary || null,
+          part.revision || null,
+          part.coatingBom?.topcoat || part.work_type || 'Coating',
+          sqIn,
+          pricePerSi,
+          unitPrice,
+          qty,
+          totalPrice,
+        );
+      }
+    }
+
+    const revision = recordRevision({
+      quoteId,
+      payload: fullPayload,
+      revisionLabel: 'v1',
+    });
+
     return {
       duplicate: false,
-      quoteId,
-      quoteNumber: safeQuoteNumber,
+      id: quoteId,
+      draftSequenceId: assignedDraftId,
+      quoteNumber: assignedDraftId,
+      odooSequenceId,
+      businessUnit,
+      status,
       revision,
       warning: null,
     };
   }
 
+  function updateQuoteStatus(quoteIdOrDraftSeq, { status, odooSequenceId }) {
+    if (typeof quoteIdOrDraftSeq === 'number') {
+      if (odooSequenceId) {
+        db.prepare(`
+          UPDATE quotes
+          SET status = ?, odoo_sequence_id = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(status, odooSequenceId, quoteIdOrDraftSeq);
+      } else {
+        db.prepare(`
+          UPDATE quotes
+          SET status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(status, quoteIdOrDraftSeq);
+      }
+    } else {
+      if (odooSequenceId) {
+        db.prepare(`
+          UPDATE quotes
+          SET status = ?, odoo_sequence_id = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE draft_sequence_id = ?
+        `).run(status, odooSequenceId, quoteIdOrDraftSeq);
+      } else {
+        db.prepare(`
+          UPDATE quotes
+          SET status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE draft_sequence_id = ?
+        `).run(status, quoteIdOrDraftSeq);
+      }
+    }
+  }
+
   function getHistory() {
     return db
       .prepare(`
-        SELECT q.quote_id, q.quote_number, q.created_at, q.customer_json, q.parts_json, q.pdf_hash, q.source_file,
-               (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.quote_id) as revision_count
+        SELECT q.id, q.draft_sequence_id, q.odoo_sequence_id, q.business_unit,
+               q.customer_name, q.customer_email, q.pdf_sha256, q.source_file,
+               q.status, q.created_at, q.updated_at,
+               (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.id) as revision_count,
+               (SELECT COUNT(*) FROM quote_line_items WHERE quote_id = q.id) as line_item_count
         FROM quotes q
         ORDER BY q.created_at DESC
       `)
       .all()
       .map((row) => ({
-        quoteId: row.quote_id,
-        quoteNumber: row.quote_number,
-        createdAt: row.created_at,
-        customer: normalizePayload(row.customer_json),
-        parts: normalizePayload(row.parts_json),
-        pdfHash: row.pdf_hash,
+        id: row.id,
+        draftSequenceId: row.draft_sequence_id,
+        quoteNumber: row.draft_sequence_id,
+        odooSequenceId: row.odoo_sequence_id,
+        businessUnit: row.business_unit,
+        customerName: row.customer_name,
+        customerEmail: row.customer_email,
+        pdfHash: row.pdf_sha256,
         sourceFile: row.source_file,
-        revisionCount: Number(row.revision_count || 0),
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        revisionCount: Number(row.revision_count || 1),
+        lineItemCount: Number(row.line_item_count || 0),
       }));
   }
 
-  function searchQuotes(query = '') {
-    const terms = String(query).trim();
-    if (!terms) return getHistory();
-    const matcher = `%${terms}%`;
-    return db
+  function getQuoteById(id) {
+    const row = db
       .prepare(`
-        SELECT q.quote_id, q.quote_number, q.created_at, q.customer_json, q.parts_json, q.pdf_hash, q.source_file,
-               (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.quote_id) as revision_count
+        SELECT q.id, q.draft_sequence_id, q.odoo_sequence_id, q.business_unit,
+               q.customer_name, q.customer_email, q.pdf_sha256, q.source_file,
+               q.form_payload, q.status, q.created_at, q.updated_at,
+               (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.id) as revision_count
         FROM quotes q
-        WHERE q.quote_number LIKE ?
-           OR q.customer_json LIKE ?
-           OR q.parts_json LIKE ?
-           OR q.source_file LIKE ?
-        ORDER BY q.created_at DESC
+        WHERE q.id = ? OR q.draft_sequence_id = ?
       `)
-      .all(matcher, matcher, matcher, matcher)
-      .map((row) => ({
-        quoteId: row.quote_id,
-        quoteNumber: row.quote_number,
-        createdAt: row.created_at,
-        customer: normalizePayload(row.customer_json),
-        parts: normalizePayload(row.parts_json),
-        pdfHash: row.pdf_hash,
-        sourceFile: row.source_file,
-        revisionCount: Number(row.revision_count || 0),
+      .get(id, id);
+
+    if (!row) return null;
+
+    const lineItems = db
+      .prepare('SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY id ASC')
+      .all(row.id);
+
+    const revisions = db
+      .prepare('SELECT revision_id, revision_label, created_at, payload_json FROM quote_revisions WHERE quote_id = ? ORDER BY created_at ASC')
+      .all(row.id)
+      .map((r) => ({
+        revisionId: r.revision_id,
+        revisionLabel: r.revision_label,
+        createdAt: r.created_at,
+        payload: normalizePayload(r.payload_json),
       }));
+
+    return {
+      id: row.id,
+      draftSequenceId: row.draft_sequence_id,
+      quoteNumber: row.draft_sequence_id,
+      odooSequenceId: row.odoo_sequence_id,
+      businessUnit: row.business_unit,
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      pdfHash: row.pdf_sha256,
+      sourceFile: row.source_file,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      revisionCount: Number(row.revision_count || 1),
+      formPayload: normalizePayload(row.form_payload),
+      lineItems,
+      revisions,
+    };
+  }
+
+  function searchQuotes({ query = '', businessUnit = '', status = '', startDate = '', endDate = '' } = {}) {
+    const terms = String(query || '').trim();
+    let sql = `
+      SELECT DISTINCT q.id, q.draft_sequence_id, q.odoo_sequence_id, q.business_unit,
+             q.customer_name, q.customer_email, q.pdf_sha256, q.source_file,
+             q.status, q.created_at, q.updated_at,
+             (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.id) as revision_count,
+             (SELECT COUNT(*) FROM quote_line_items WHERE quote_id = q.id) as line_item_count
+      FROM quotes q
+      LEFT JOIN quote_line_items li ON li.quote_id = q.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (terms) {
+      const matcher = `%${terms}%`;
+      sql += `
+        AND (
+          q.draft_sequence_id LIKE ?
+          OR (q.odoo_sequence_id IS NOT NULL AND q.odoo_sequence_id LIKE ?)
+          OR q.customer_name LIKE ?
+          OR (q.customer_email IS NOT NULL AND q.customer_email LIKE ?)
+          OR (q.source_file IS NOT NULL AND q.source_file LIKE ?)
+          OR (q.pdf_sha256 IS NOT NULL AND q.pdf_sha256 LIKE ?)
+          OR (li.part_number IS NOT NULL AND li.part_number LIKE ?)
+          OR (li.description IS NOT NULL AND li.description LIKE ?)
+        )
+      `;
+      params.push(matcher, matcher, matcher, matcher, matcher, matcher, matcher, matcher);
+    }
+
+    if (businessUnit && businessUnit !== 'all') {
+      sql += ` AND q.business_unit LIKE ?`;
+      params.push(`%${businessUnit}%`);
+    }
+
+    if (status && status !== 'all') {
+      sql += ` AND q.status = ?`;
+      params.push(status.toUpperCase());
+    }
+
+    if (startDate) {
+      sql += ` AND q.created_at >= ?`;
+      params.push(startDate);
+    }
+
+    if (endDate) {
+      sql += ` AND q.created_at <= ?`;
+      params.push(endDate);
+    }
+
+    sql += ` ORDER BY q.created_at DESC`;
+
+    return db
+      .prepare(sql)
+      .all(...params)
+      .map((row) => ({
+        id: row.id,
+        draftSequenceId: row.draft_sequence_id,
+        quoteNumber: row.draft_sequence_id,
+        odooSequenceId: row.odoo_sequence_id,
+        businessUnit: row.business_unit,
+        customerName: row.customer_name,
+        customerEmail: row.customer_email,
+        pdfHash: row.pdf_sha256,
+        sourceFile: row.source_file,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        revisionCount: Number(row.revision_count || 1),
+        lineItemCount: Number(row.line_item_count || 0),
+      }));
+  }
+
+  function deleteQuote(id) {
+    db.prepare('DELETE FROM quote_line_items WHERE quote_id = ?').run(id);
+    db.prepare('DELETE FROM quote_revisions WHERE quote_id = ?').run(id);
+    const result = db.prepare('DELETE FROM quotes WHERE id = ? OR draft_sequence_id = ?').run(id, id);
+    return result.changes > 0;
   }
 
   function getRevisions(quoteId) {
@@ -230,42 +558,46 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
       }));
   }
 
-  function getLatestQuoteNumber() {
-    const row = db.prepare('SELECT quote_number FROM quotes ORDER BY created_at DESC LIMIT 1').get();
-    return row?.quote_number || null;
-  }
-
   function buildCsv({ customer, parts, quoteNumber }) {
     const rows = Array.isArray(parts) ? parts : [];
-    const header = ['Part Number', 'Name / Description', 'Rev', 'Sq. In. / Unit', 'Work Type', 'Price / SI', 'Price / Unit', 'Qty', 'Total'];
+    const header = ['Part Number', 'Description', 'Rev', 'Work Type', 'Sq. In. / Unit', 'Price / SI', 'Price / Unit', 'Qty', 'Total'];
     const csvRows = [header.join(',')];
     for (const part of rows) {
+      const sqIn = Number(part.totalSurfaceAreaSqIn || part.sq_in_per_unit || 0);
+      const qty = Number(part.quantity || 1);
+      const pricePerSi = Number(part.pricePerSi || 0.40);
+      const unitPrice = Number(part.priceUnit || (sqIn > 0 ? (sqIn * pricePerSi).toFixed(2) : 5.0));
+      const total = Number(part.totalPrice || (unitPrice * qty).toFixed(2));
+
       const line = [
         part.partNumber || '',
-        part.partName || '',
+        part.partName || part.description || '',
         part.revision || '',
-        part.totalSurfaceAreaSqIn ?? '',
-        part.coatingBom?.topcoat || 'Coating',
-        '',
-        '',
-        part.quantity ?? 1,
-        '',
+        part.coatingBom?.topcoat || part.work_type || 'Coating',
+        sqIn > 0 ? sqIn : '',
+        pricePerSi > 0 ? pricePerSi : '',
+        unitPrice,
+        qty,
+        total,
       ];
       csvRows.push(line.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','));
     }
-    return `Quote Number,${quoteNumber || 'QP-0000'}\nCustomer,${customer?.company || customer?.contact || ''}\n\n${csvRows.join('\n')}`;
+    return `Quote Number,${quoteNumber || 'QP26-0001'}\nCustomer,${customer?.company || customer?.contact || 'Standard Customer'}\n\n${csvRows.join('\n')}`;
   }
 
   return {
     db,
-    issueQuoteNumber,
-    nextQuoteSequence,
+    getCurrentDraftSequenceId,
+    getNextDraftSequenceId,
+    advanceSequenceCounter,
     findDuplicateQuote: findDuplicateQuoteByHash,
     recordQuote,
+    updateQuoteStatus,
     getHistory,
+    getQuoteById,
     searchQuotes,
+    deleteQuote,
     getRevisions,
-    getLatestQuoteNumber,
     buildCsv,
   };
 }

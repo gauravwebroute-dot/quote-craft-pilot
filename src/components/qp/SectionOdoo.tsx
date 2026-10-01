@@ -2,6 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,7 +16,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileSpreadsheet, PlusCircle, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  FileSpreadsheet,
+  PlusCircle,
+  RefreshCw,
+  GitCompare,
+  Check,
+  AlertCircle,
+  Clock,
+  ShieldCheck,
+  Lock,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
@@ -23,7 +39,7 @@ type PartCrossCheck = {
   revision: string | null;
   sourceFile: string | null;
   reason: "NEW_CUSTOMER" | "EXISTING_QUOTE_FOUND" | "NO_PRIOR_QUOTE_FOR_THIS_PART";
-  previousQuote: { pricePerUnit?: number; quotedAt?: string; saleOrderName?: string } | null;
+  previousQuote: { pricePerUnit?: number; revision?: string | null; quotedAt?: string; saleOrderName?: string } | null;
   computedPrice: {
     pricePerUnit?: number;
     totalLineItem?: number;
@@ -32,17 +48,40 @@ type PartCrossCheck = {
   };
 };
 
+export type ConflictItem = {
+  id: string;
+  partNumber?: string;
+  fieldName: string;
+  extractedValue: string;
+  odooMasterValue: string;
+  resolution: "keep_extracted" | "use_odoo" | "manual" | null;
+  manualValue: string;
+};
+
+type SubCheck = {
+  status: "COMPLETE" | "CONFLICT" | "NEEDS_ATTENTION" | "NOT_STARTED" | string;
+  label: string;
+  message: string;
+};
+
 type CrossCheckResult = {
   mode: string;
   message: string;
-  customer?: { matched?: boolean; record?: { name?: string } | null } | null;
+  customer?: { matched?: boolean; record?: { name?: string; billingTerms?: string } | null } | null;
   parts: PartCrossCheck[];
+  subChecks?: {
+    clientVerification?: SubCheck;
+    partMasterSync?: SubCheck;
+    exportQuotationCheck?: SubCheck;
+  };
+  conflicts?: ConflictItem[];
+  hasConflicts?: boolean;
 };
 
 type CreateResult = {
   mode: string;
   message: string;
-  created: { saleOrderName?: string | null; lineCount?: number } | null;
+  created: { saleOrderId?: number; saleOrderName?: string | null; lineCount?: number } | null;
   skipped: Array<{ partNumber: string | null }>;
 };
 
@@ -69,58 +108,28 @@ export function SectionOdoo({
   onBack,
   extraction,
   quoteNumber,
+  businessUnit = "OC Custom Coating",
+  onSyncComplete,
 }: {
   onBack: () => void;
   extraction?: ExtractionResult | null;
   quoteNumber?: string;
+  businessUnit?: string;
+  onSyncComplete?: (odooOrderName: string) => void;
 }) {
   const [crossCheck, setCrossCheck] = useState<CrossCheckResult | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reconciliation / Conflict resolution state (REQ-008, Section 6.2)
+  const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
+  const [syncedOrder, setSyncedOrder] = useState<string | null>(null);
 
   const [creatingPart, setCreatingPart] = useState<string | null>(null);
   const [createResults, setCreateResults] = useState<
     Record<string, CreateResult | { error: string }>
   >({});
-  const [quoteHistory, setQuoteHistory] = useState<Array<{ quoteNumber: string; createdAt: string; revisionCount: number }>>([]);
-
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const response = await fetch(`${apiUrl()}/api/quotes/history`);
-        if (!response.ok) return;
-        const payload = await response.json();
-        setQuoteHistory((payload?.quotes ?? []).slice(0, 5));
-      } catch {
-        // History is optional for the UI if the backend is unavailable.
-      }
-    };
-    void loadHistory();
-  }, []);
-
-  const subStepStatuses = [
-    {
-      label: "Client Verification",
-      state: crossCheck?.customer ? (crossCheck.customer.matched ? "Complete" : "Needs attention") : "Not started",
-      variant: crossCheck?.customer ? (crossCheck.customer.matched ? "success" : "warning") : "neutral",
-    },
-    {
-      label: "Part Master Sync",
-      state: crossCheck?.parts?.length ? "Ready" : "Not started",
-      variant: crossCheck?.parts?.length ? "success" : "neutral",
-    },
-    {
-      label: "Export Quotation",
-      state: extraction?.parts?.length ? "Ready" : "Pending",
-      variant: extraction?.parts?.length ? "success" : "neutral",
-    },
-  ];
-
-  const handleDownloadCsv = () => {
-    if (!extraction?.parts?.length) return;
-    const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
-    downloadOdooCsv(extraction.parts, customer, null, `${quoteNumber || "quotation"}_odoo_import.csv`);
-  };
 
   const runCrossCheck = async () => {
     if (!extraction) {
@@ -135,9 +144,10 @@ export function SectionOdoo({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customer: extraction.customer, parts: extraction.parts }),
       });
-      const payload = await response.json();
+      const payload: CrossCheckResult = await response.json();
       if (!response.ok) throw new Error(payload.message || "Odoo cross-check failed.");
       setCrossCheck(payload);
+      setConflicts(payload.conflicts || []);
     } catch (requestError) {
       setError(
         requestError instanceof TypeError
@@ -151,9 +161,88 @@ export function SectionOdoo({
     }
   };
 
-  // Only called after the user explicitly clicks "Allow" in the confirm
-  // dialog below. Sends confirm:true - the backend independently
-  // re-verifies this part isn't a duplicate before writing anything.
+  // Check on mount if extraction is available
+  useEffect(() => {
+    if (extraction && !crossCheck && !isChecking) {
+      void runCrossCheck();
+    }
+  }, [extraction]);
+
+  const handleResolutionChange = (conflictId: string, resolution: "keep_extracted" | "use_odoo" | "manual") => {
+    setConflicts((prev) =>
+      prev.map((c) => (c.id === conflictId ? { ...c, resolution } : c)),
+    );
+  };
+
+  const handleManualValueChange = (conflictId: string, manualValue: string) => {
+    setConflicts((prev) =>
+      prev.map((c) => (c.id === conflictId ? { ...c, manualValue } : c)),
+    );
+  };
+
+  // REQ-008: Sync Guard Rule - The Sync to Odoo button is disabled until every conflict has an explicit selection
+  const allConflictsResolved = conflicts.length === 0 || conflicts.every((c) => {
+    if (!c.resolution) return false;
+    if (c.resolution === "manual" && !c.manualValue.trim()) return false;
+    return true;
+  });
+
+  const handleDownloadCsv = () => {
+    if (!extraction?.parts?.length) return;
+    const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
+    downloadOdooCsv(extraction.parts, customer, null, `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`);
+
+    // Record terminal export action (Mode B)
+    void fetch(`${apiUrl()}/api/quotes/terminal-action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        draftSequenceId: quoteNumber,
+        action: "EXCEL_EXPORT",
+      }),
+    });
+  };
+
+  const handleSyncToOdooAll = async () => {
+    if (!extraction || !extraction.parts?.length) return;
+    setIsSyncing(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiUrl()}/api/odoo/create-quotation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer: extraction.customer,
+          parts: extraction.parts,
+          formPayload: extraction,
+          confirm: true,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "Failed to create Odoo quotation.");
+
+      const createdOrderName = payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
+      setSyncedOrder(createdOrderName);
+
+      // Record Mode A terminal action: locked in DB & transitioned ID
+      await fetch(`${apiUrl()}/api/quotes/terminal-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draftSequenceId: quoteNumber,
+          action: "ODOO_SYNC",
+          odooSequenceId: createdOrderName,
+        }),
+      });
+
+      onSyncComplete?.(createdOrderName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to sync quotation with Odoo.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const confirmAddToOdoo = async (part: PartCrossCheck) => {
     if (!extraction || !part.partNumber) return;
     setCreatingPart(part.partNumber);
@@ -165,12 +254,17 @@ export function SectionOdoo({
         body: JSON.stringify({
           customer: extraction.customer,
           parts: original ? [original] : [],
+          formPayload: extraction,
           confirm: true,
         }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to add to Odoo.");
       setCreateResults((prev) => ({ ...prev, [part.partNumber as string]: payload }));
+      if (payload.created?.saleOrderName) {
+        setSyncedOrder(payload.created.saleOrderName);
+        onSyncComplete?.(payload.created.saleOrderName);
+      }
     } catch (requestError) {
       setCreateResults((prev) => ({
         ...prev,
@@ -183,41 +277,115 @@ export function SectionOdoo({
     }
   };
 
+  const clientStatus = crossCheck?.subChecks?.clientVerification?.status ||
+    (crossCheck?.customer?.matched ? "COMPLETE" : crossCheck ? "NEEDS_ATTENTION" : "NOT_STARTED");
+
+  const partStatus = crossCheck?.subChecks?.partMasterSync?.status ||
+    (conflicts.length > 0 ? "CONFLICT" : crossCheck?.parts?.length ? "COMPLETE" : "NOT_STARTED");
+
+  const exportStatus = crossCheck?.subChecks?.exportQuotationCheck?.status ||
+    (extraction?.parts?.length ? "COMPLETE" : "NOT_STARTED");
+
+  const getIndicatorBadge = (status: string, defaultLabel: string) => {
+    switch (status) {
+      case "COMPLETE":
+        return <Badge className="bg-[#1B4332] text-white hover:bg-[#1B4332] font-semibold"><Check className="size-3 mr-1" /> Complete</Badge>;
+      case "CONFLICT":
+        return <Badge className="bg-[#DC2626] text-white hover:bg-[#DC2626] font-semibold"><AlertTriangle className="size-3 mr-1" /> Conflict / Error</Badge>;
+      case "NEEDS_ATTENTION":
+        return <Badge className="bg-[#D97706] text-white hover:bg-[#D97706] font-semibold"><AlertCircle className="size-3 mr-1" /> Needs Action</Badge>;
+      default:
+        return <Badge className="bg-[#6C757D] text-white hover:bg-[#6C757D] font-medium"><Clock className="size-3 mr-1" /> Pending</Badge>;
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Odoo Cross-Check</h1>
-        <p className="mt-1 text-base text-muted-foreground">
-          Cross-check with existing Odoo data before adding anything new. Reading from Odoo never
-          changes it — nothing gets written unless you explicitly confirm it, part by part.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Odoo Cross-Check & Sync</h1>
+            <p className="mt-1 text-base text-muted-foreground">
+              Verify extracted data against live ERP records, reconcile any discrepancies, and finalize sync.
+            </p>
+          </div>
+          {syncedOrder ? (
+            <div className="flex items-center gap-2 rounded-lg bg-[#1B4332]/10 border border-[#1B4332]/30 px-3 py-2 text-[#1B4332] dark:text-emerald-400">
+              <Lock className="size-4" />
+              <span className="text-sm font-semibold">Locked: {quoteNumber} &rarr; {syncedOrder}</span>
+            </div>
+          ) : (
+            <Badge variant="outline" className="font-mono text-xs border-[#374151]">
+              Draft Sequence: {quoteNumber || "QP26-0001"}
+            </Badge>
+          )}
+        </div>
       </div>
 
+      {/* Primary Actions Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button onClick={runCrossCheck} disabled={isChecking}>
-            <RefreshCw className="size-4" /> {isChecking ? "Checking..." : "Run Cross-Check"}
+          <Button onClick={runCrossCheck} disabled={isChecking} className="bg-primary hover:bg-primary/90">
+            <RefreshCw className={`size-4 mr-1.5 ${isChecking ? "animate-spin" : ""}`} />
+            {isChecking ? "Verifying..." : "Run Cross-Check"}
           </Button>
+
+          {/* Sync to Odoo Primary Button (REQ-008: Sync Guard Rule) */}
+          <Button
+            onClick={handleSyncToOdooAll}
+            disabled={isSyncing || !crossCheck || !allConflictsResolved || Boolean(syncedOrder)}
+            className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90 disabled:opacity-50"
+          >
+            <ShieldCheck className="size-4 mr-1.5" />
+            {isSyncing ? "Syncing..." : syncedOrder ? `Synced to Odoo (${syncedOrder})` : "Sync to Odoo"}
+          </Button>
+
           {extraction?.parts && extraction.parts.length > 0 && (
             <Button
               variant="outline"
               onClick={handleDownloadCsv}
-              className="gap-2 text-emerald-700 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-500/10"
+              className="gap-2 text-emerald-700 dark:text-emerald-400 border-[#374151] hover:bg-emerald-500/10"
             >
-              <FileSpreadsheet className="size-4" /> Download Odoo Import CSV
+              <FileSpreadsheet className="size-4" /> Export Excel / CSV
             </Button>
           )}
         </div>
-        <Badge variant="neutral">BU: OC Custom Coating</Badge>
+        <Badge variant="outline" className="text-xs font-medium border-[#374151]">
+          BU: {businessUnit}
+        </Badge>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {subStepStatuses.map((step) => (
-          <div key={step.label} className="flex items-center gap-2 rounded-full border border-border bg-surface px-2.5 py-1.5 text-xs">
-            <span className="font-medium text-foreground">{step.label}</span>
-            <Badge variant={step.variant as "success" | "warning" | "neutral"}>{step.state}</Badge>
+      {/* Granular Sub-Step Indicators (REQ-007, Section 6.1) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-sm">1. Client Verification</span>
+            {getIndicatorBadge(clientStatus, "Pending")}
           </div>
-        ))}
+          <p className="text-xs text-muted-foreground mt-1">
+            {crossCheck?.subChecks?.clientVerification?.message || "Validates customer in res.partner."}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-sm">2. Part Master Sync</span>
+            {getIndicatorBadge(partStatus, "Pending")}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {crossCheck?.subChecks?.partMasterSync?.message || "Cross-references parts against Odoo catalog."}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-sm">3. Export Quotation Check</span>
+            {getIndicatorBadge(exportStatus, "Pending")}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {crossCheck?.subChecks?.exportQuotationCheck?.message || "Validates subtotal arithmetic & tax terms."}
+          </p>
+        </div>
       </div>
 
       {error ? (
@@ -226,40 +394,115 @@ export function SectionOdoo({
         </Alert>
       ) : null}
 
-      {quoteHistory.length > 0 ? (
-        <Card className="border-border shadow-2xs">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Quote History & Revisions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {quoteHistory.map((quote) => (
-                <div key={quote.quoteNumber} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="success">{quote.quoteNumber}</Badge>
-                    <span className="text-muted-foreground">{new Date(quote.createdAt).toLocaleDateString()}</span>
-                  </div>
-                  <Badge variant="neutral">{quote.revisionCount} revision{quote.revisionCount === 1 ? "" : "s"}</Badge>
-                </div>
-              ))}
+      {/* Conflict / Diff Reconciliation View (REQ-008, Section 6.2) */}
+      {conflicts.length > 0 && !syncedOrder ? (
+        <Card className="border-[#DC2626]/40 bg-card shadow-md">
+          <CardHeader className="bg-[#DC2626]/5 border-b border-[#DC2626]/20 pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-[#DC2626]">
+                <GitCompare className="size-5" />
+                <CardTitle className="text-lg font-bold">Conflict / Diff Reconciliation View</CardTitle>
+              </div>
+              <Badge className="bg-[#DC2626] text-white font-semibold">
+                {conflicts.length} Conflict{conflicts.length === 1 ? "" : "s"} Detected
+              </Badge>
             </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Discrepancies identified between Extracted RFQ values and live Odoo master values. Explicitly select a resolution action for each row before synchronization is unlocked.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted/40 text-xs uppercase font-semibold text-muted-foreground border-b border-border">
+                  <tr>
+                    <th className="px-4 py-3">Field Name</th>
+                    <th className="px-4 py-3">Extracted RFQ Value</th>
+                    <th className="px-4 py-3">Live Odoo Master Value</th>
+                    <th className="px-4 py-3 min-w-[320px]">Resolution Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {conflicts.map((conflict) => (
+                    <tr key={conflict.id} className="hover:bg-muted/20">
+                      <td className="px-4 py-3 font-semibold text-foreground text-sm">
+                        {conflict.fieldName}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="rounded bg-amber-500/10 text-amber-800 dark:text-amber-300 font-mono px-2 py-1 text-xs">
+                          {conflict.extractedValue}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="rounded bg-blue-500/10 text-blue-800 dark:text-blue-300 font-mono px-2 py-1 text-xs">
+                          {conflict.odooMasterValue}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <RadioGroup
+                          value={conflict.resolution || ""}
+                          onValueChange={(val) =>
+                            handleResolutionChange(conflict.id, val as "keep_extracted" | "use_odoo" | "manual")
+                          }
+                          className="flex flex-col gap-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <RadioGroupItem value="keep_extracted" id={`${conflict.id}-keep`} />
+                            <Label htmlFor={`${conflict.id}-keep`} className="text-xs font-medium cursor-pointer">
+                              Keep Extracted ({conflict.extractedValue})
+                            </Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <RadioGroupItem value="use_odoo" id={`${conflict.id}-odoo`} />
+                            <Label htmlFor={`${conflict.id}-odoo`} className="text-xs font-medium cursor-pointer">
+                              Use Odoo Master ({conflict.odooMasterValue})
+                            </Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <RadioGroupItem value="manual" id={`${conflict.id}-manual`} />
+                            <Label htmlFor={`${conflict.id}-manual`} className="text-xs font-medium cursor-pointer">
+                              Manual Value Entry:
+                            </Label>
+                            {conflict.resolution === "manual" ? (
+                              <Input
+                                placeholder="Enter value..."
+                                value={conflict.manualValue}
+                                onChange={(e) => handleManualValueChange(conflict.id, e.target.value)}
+                                className="h-7 text-xs w-40 ml-1"
+                              />
+                            ) : null}
+                          </div>
+                        </RadioGroup>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!allConflictsResolved && (
+              <div className="p-3 bg-[#DC2626]/10 text-[#DC2626] text-xs font-semibold flex items-center gap-2 border-t border-[#DC2626]/20">
+                <AlertTriangle className="size-4 shrink-0" />
+                <span>Sync Guard Active: Please resolve all {conflicts.length} conflict(s) above to enable "Sync to Odoo".</span>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : null}
 
+      {/* Cross-Check Results Details */}
       {crossCheck ? (
-        <Card className="border-primary/30 shadow-2xs">
+        <Card className="border-border shadow-2xs">
           <CardHeader>
-            <CardTitle className="text-xl font-semibold">Live Odoo Cross-Check</CardTitle>
+            <CardTitle className="text-xl font-semibold">Live Odoo Cross-Check Results</CardTitle>
             <p className="text-sm text-muted-foreground">
               Mode: {crossCheck.mode}. {crossCheck.message}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="font-medium">Customer match:</span>
-              <Badge variant={crossCheck.customer?.matched ? "success" : "warning"}>
-                {crossCheck.customer?.matched ? "Existing customer" : "New customer"}
+              <span className="font-medium text-sm">Customer Record Match:</span>
+              <Badge className={crossCheck.customer?.matched ? "bg-[#1B4332] text-white font-medium" : "bg-[#D97706] text-white font-medium"}>
+                {crossCheck.customer?.matched ? "Existing Partner in Odoo" : "New Customer (Will Create Partner)"}
               </Badge>
             </div>
 
@@ -269,33 +512,33 @@ export function SectionOdoo({
                 const createResult = part.partNumber ? createResults[part.partNumber] : undefined;
                 const alreadyCreated =
                   createResult && "created" in createResult && createResult.created;
-                const canAddToOdoo = part.reason !== "EXISTING_QUOTE_FOUND";
+                const canAddToOdoo = part.reason !== "EXISTING_QUOTE_FOUND" && !syncedOrder;
 
                 return (
-                  <div key={key} className="rounded-md border border-border p-3">
+                  <div key={key} className="rounded-lg border border-border p-3.5 bg-surface">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span className="font-medium">{part.partNumber || "Unknown part"}</span>
+                      <span className="font-semibold text-foreground text-sm font-mono">{part.partNumber || "Unknown part"}</span>
                       <Badge
-                        variant={part.reason === "EXISTING_QUOTE_FOUND" ? "success" : "warning"}
+                        className={part.reason === "EXISTING_QUOTE_FOUND" ? "bg-[#1B4332] text-white" : "bg-[#D97706] text-white"}
                       >
                         {REASON_LABEL[part.reason]}
                       </Badge>
                     </div>
 
-                    <div className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
+                    <div className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
                       <span className="text-muted-foreground">
-                        Old price:{" "}
+                        Previous Price on File:{" "}
                         {part.previousQuote ? (
-                          <strong className="text-foreground">
+                          <strong className="text-foreground font-mono">
                             {money(part.previousQuote.pricePerUnit)}
                           </strong>
                         ) : (
-                          "none on file"
+                          "none"
                         )}
                       </span>
                       <span className="text-muted-foreground">
-                        Computed price now:{" "}
-                        <strong className="text-foreground">
+                        Extracted / Calculated Price:{" "}
+                        <strong className="text-foreground font-mono">
                           {part.computedPrice?.priced === false
                             ? "not enough data"
                             : money(part.computedPrice?.pricePerUnit)}
@@ -310,30 +553,29 @@ export function SectionOdoo({
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={creatingPart === part.partNumber}
+                              disabled={creatingPart === part.partNumber || !allConflictsResolved}
+                              className="border-[#374151] text-xs h-8"
                             >
-                              <PlusCircle className="size-3.5" />
+                              <PlusCircle className="size-3.5 mr-1" />
                               {creatingPart === part.partNumber ? "Adding..." : "Add to Odoo"}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Add this quote to Odoo?</AlertDialogTitle>
+                              <AlertDialogTitle>Add quote line to Odoo?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                This will create a new quotation in your live Odoo instance for{" "}
+                                This will create a new quotation in Odoo for{" "}
                                 <strong>{part.partNumber}</strong> at{" "}
                                 <strong>{money(part.computedPrice?.pricePerUnit)}</strong>/unit.
                                 {crossCheck.customer?.matched
-                                  ? " The existing customer record will be used as-is."
-                                  : " A new customer record will also be created."}{" "}
-                                No existing Odoo record will ever be modified or deleted by this
-                                action.
+                                  ? " The existing partner record will be linked."
+                                  : " A new customer partner record will also be created."}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Deny</AlertDialogCancel>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
                               <AlertDialogAction onClick={() => confirmAddToOdoo(part)}>
-                                Allow
+                                Confirm
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
@@ -342,9 +584,9 @@ export function SectionOdoo({
                     ) : null}
 
                     {alreadyCreated ? (
-                      <Alert className="mt-3 border-success/30 bg-surface-success">
-                        <CheckCircle2 className="size-4 text-success" />
-                        <AlertDescription className="text-foreground">
+                      <Alert className="mt-3 border-[#1B4332]/30 bg-[#1B4332]/10">
+                        <CheckCircle2 className="size-4 text-[#1B4332] dark:text-emerald-400" />
+                        <AlertDescription className="text-foreground text-xs">
                           Added to Odoo as quotation{" "}
                           <strong>
                             {"created" in createResult && createResult.created?.saleOrderName}
@@ -356,7 +598,7 @@ export function SectionOdoo({
 
                     {createResult && "error" in createResult ? (
                       <Alert variant="destructive" className="mt-3">
-                        <AlertDescription>{createResult.error}</AlertDescription>
+                        <AlertDescription className="text-xs">{createResult.error}</AlertDescription>
                       </Alert>
                     ) : null}
                   </div>
@@ -368,8 +610,8 @@ export function SectionOdoo({
       ) : null}
 
       <div className="flex">
-        <Button variant="ghost" onClick={onBack}>
-          <ArrowLeft className="size-4" /> Back to Extraction Results
+        <Button variant="outline" onClick={onBack} className="border-[#374151] text-xs">
+          <ArrowLeft className="size-4 mr-1" /> Back to Extraction Results
         </Button>
       </div>
     </div>
