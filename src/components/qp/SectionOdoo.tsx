@@ -14,7 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { AlertTriangle, ArrowLeft, CheckCircle2, FileSpreadsheet, PlusCircle, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
 
@@ -82,6 +82,21 @@ export function SectionOdoo({
   const [createResults, setCreateResults] = useState<
     Record<string, CreateResult | { error: string }>
   >({});
+  const [quoteHistory, setQuoteHistory] = useState<Array<{ quoteNumber: string; createdAt: string; revisionCount: number }>>([]);
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const response = await fetch(`${apiUrl()}/api/quotes/history`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        setQuoteHistory((payload?.quotes ?? []).slice(0, 5));
+      } catch {
+        // History is optional for the UI if the backend is unavailable.
+      }
+    };
+    void loadHistory();
+  }, []);
 
   const subStepStatuses = [
     {
@@ -209,6 +224,27 @@ export function SectionOdoo({
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      ) : null}
+
+      {quoteHistory.length > 0 ? (
+        <Card className="border-border shadow-2xs">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Quote History & Revisions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {quoteHistory.map((quote) => (
+                <div key={quote.quoteNumber} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="success">{quote.quoteNumber}</Badge>
+                    <span className="text-muted-foreground">{new Date(quote.createdAt).toLocaleDateString()}</span>
+                  </div>
+                  <Badge variant="neutral">{quote.revisionCount} revision{quote.revisionCount === 1 ? "" : "s"}</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {crossCheck ? (

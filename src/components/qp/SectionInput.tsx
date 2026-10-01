@@ -175,6 +175,16 @@ export function SectionInput({
     window.open(URL.createObjectURL(file), "_blank", "noopener,noreferrer");
   };
 
+  const computePdfHash = async (files: File[]) => {
+    if (!files.length) return null;
+    const file = files[0];
+    const buffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -395,6 +405,41 @@ export function SectionInput({
                   });
                   const payload = await response.json();
                   if (!response.ok) throw new Error(payload.message || "Extraction failed.");
+
+                  const pdfHash = await computePdfHash(uploadedFiles);
+                  if (pdfHash) {
+                    const duplicateResponse = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        pdfHash,
+                        sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
+                        customer: payload.extraction.customer,
+                        parts: payload.extraction.parts,
+                      }),
+                    });
+                    const duplicatePayload = await duplicateResponse.json();
+                    if (duplicatePayload.duplicate) {
+                      setError(duplicatePayload.warning || "Duplicate PDF detected.");
+                    }
+                  }
+
+                  const quoteStoreResponse = await fetch(`${apiUrl}/api/quotes/save`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      quoteNumber: undefined,
+                      customer: payload.extraction.customer,
+                      parts: payload.extraction.parts,
+                      pdfHash,
+                      sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
+                      payload: payload.extraction,
+                    }),
+                  });
+                  if (!quoteStoreResponse.ok) {
+                    console.warn("Quote history save failed.");
+                  }
+
                   onRun(payload.extraction, uploadedFiles);
                 } catch (requestError) {
                   setError(
