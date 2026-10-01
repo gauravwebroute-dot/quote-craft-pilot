@@ -355,10 +355,28 @@ function normalizeOdooUrl(value) {
   return url;
 }
 
+export async function getAllCompanyIds(uid) {
+  try {
+    const companies = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "res.company",
+      "search_read",
+      [[]],
+      { fields: ["id", "name"], limit: 50 },
+    ]);
+    return companies.map((c) => c.id);
+  } catch {
+    return [];
+  }
+}
+
 export async function searchLiveOdooQuotes({ query = '', businessUnit = '', status = '', startDate = '', endDate = '' } = {}) {
   if (!isLiveConfigured()) return [];
   try {
     const uid = await odooAuth();
+    const allCompanyIds = await getAllCompanyIds(uid);
     const domain = [];
 
     if (query) {
@@ -382,6 +400,8 @@ export async function searchLiveOdooQuotes({ query = '', businessUnit = '', stat
       domain.push(["date_order", "<=", endDate]);
     }
 
+    const contextObj = allCompanyIds.length > 0 ? { allowed_company_ids: allCompanyIds } : {};
+
     const orders = await odooCall("object", "execute_kw", [
       process.env.ODOO_DB,
       uid,
@@ -403,6 +423,7 @@ export async function searchLiveOdooQuotes({ query = '', businessUnit = '', stat
           "order_line",
           "note",
         ],
+        context: contextObj,
         limit: 50,
         order: "id desc",
       },
@@ -441,6 +462,8 @@ export async function getLiveOdooQuoteDetails(idOrName) {
   if (!isLiveConfigured()) return null;
   try {
     const uid = await odooAuth();
+    const allCompanyIds = await getAllCompanyIds(uid);
+    const contextObj = allCompanyIds.length > 0 ? { allowed_company_ids: allCompanyIds } : {};
     const cleanId = String(idOrName).startsWith('odoo-') ? parseInt(String(idOrName).replace('odoo-', ''), 10) : null;
     const domain = cleanId ? [[["id", "=", cleanId]]] : [[["name", "=", idOrName]]];
 
@@ -465,6 +488,7 @@ export async function getLiveOdooQuoteDetails(idOrName) {
           "order_line",
           "note",
         ],
+        context: contextObj,
         limit: 1,
       },
     ]);
@@ -484,6 +508,7 @@ export async function getLiveOdooQuoteDetails(idOrName) {
           [[["id", "in", order.order_line]]],
           {
             fields: ["id", "name", "price_unit", "product_uom_qty", "price_subtotal", "product_id"],
+            context: contextObj,
             limit: 100,
           },
         ]);
