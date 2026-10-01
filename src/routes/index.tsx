@@ -93,7 +93,7 @@ function QuotePilot() {
 
           {/* Main Workspace / Section Content - min-w-0 lets the table's own overflow-x-auto work instead of the flex item refusing to shrink/scroll */}
           <div className="min-w-0 flex-1 space-y-6">
-            <RfqHeader />
+            <RfqHeader extraction={extraction} />
 
             {step === 0 ? (
               <SectionInput

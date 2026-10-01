@@ -6,12 +6,16 @@ const pills: Array<[string, string]> = [
   ["Customer:", "ABC Metal Works"],
 ];
 
-export function RfqHeader() {
+export function RfqHeader({ extraction }: { extraction?: { parts?: Array<unknown> } | null }) {
+  const hasExtraction = Boolean(extraction?.parts && extraction.parts.length > 0);
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
       <div className="flex items-center gap-3">
         <h2 className="text-2xl font-bold tracking-tight">QP26-001</h2>
-        <Badge variant="success">Extraction Complete</Badge>
+        <Badge variant={hasExtraction ? "success" : "neutral"}>
+          {hasExtraction ? "Extraction Complete" : "No extraction"}
+        </Badge>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {pills.map(([k, v]) => (

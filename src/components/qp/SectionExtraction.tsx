@@ -804,8 +804,13 @@ export function SectionExtraction({
   }
 
   const parts = extraction?.parts ?? [];
+  const hasExtractedParts = parts.length > 0;
   const selectedPart = selectedPartIndex >= 0 && selectedPartIndex < parts.length ? parts[selectedPartIndex] : null;
   const selectedPartPricing = selectedPartIndex >= 0 ? pricing?.results[selectedPartIndex] : undefined;
+
+  const handleRunExtraction = () => {
+    onBack();
+  };
 
   // Extracted rows for Part Summary table with deterministic area & masking logic
   const summaryRows = parts.map((part, index) => {
@@ -917,17 +922,31 @@ export function SectionExtraction({
         </div>
       </div>
 
-      <Alert className="border-success/30 bg-surface-success shadow-2xs">
-        <CheckCircle className="size-4 text-success shrink-0" />
-        <AlertDescription className="flex w-full flex-wrap items-center justify-between gap-2 text-foreground">
-          <span className="font-medium text-sm">
-            AI extraction and deterministic pricing complete.
-          </span>
-          <span className="text-xs font-semibold text-primary">
-            Quote Total: {pricing ? formatMoney(pricing.quoteTotal) : "Calculating..."}
-          </span>
-        </AlertDescription>
-      </Alert>
+      {hasExtractedParts ? (
+        <Alert className="border-success/30 bg-surface-success shadow-2xs">
+          <CheckCircle className="size-4 text-success shrink-0" />
+          <AlertDescription className="flex w-full flex-wrap items-center justify-between gap-2 text-foreground">
+            <span className="font-medium text-sm">
+              AI extraction and deterministic pricing complete.
+            </span>
+            <span className="text-xs font-semibold text-primary">
+              Quote Total: {pricing ? formatMoney(pricing.quoteTotal) : "Calculating..."}
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <Alert className="border-amber-500/30 bg-amber-500/5 shadow-2xs">
+          <CheckCircle className="size-4 text-amber-600 shrink-0" />
+          <AlertDescription className="flex w-full flex-wrap items-center justify-between gap-3 text-foreground">
+            <span className="font-medium text-sm">
+              No parts have been extracted yet. Run extraction to generate the quote summary.
+            </span>
+            <Button variant="default" size="sm" onClick={handleRunExtraction} className="gap-2">
+              <ArrowLeft className="size-4" /> Run Extraction
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* VIEW MODE 1: PART DETAILS VIEW (When a specific part is clicked) */}
       {selectedPart ? (
@@ -1131,9 +1150,16 @@ export function SectionExtraction({
         <Button variant="outline" onClick={onBack} className="gap-2">
           <ArrowLeft className="size-4" /> Back to Input
         </Button>
-        <Button onClick={onContinue} className="gap-2 bg-primary">
-          Continue to Odoo Cross-Check <ArrowRight className="size-4" />
-        </Button>
+        <div className="flex items-center gap-2">
+          {!hasExtractedParts ? (
+            <Button variant="default" onClick={handleRunExtraction} className="gap-2">
+              <ArrowLeft className="size-4" /> Run Extraction
+            </Button>
+          ) : null}
+          <Button onClick={onContinue} className="gap-2 bg-primary" disabled={!hasExtractedParts}>
+            Continue to Odoo Cross-Check <ArrowRight className="size-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );

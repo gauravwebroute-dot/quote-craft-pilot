@@ -83,6 +83,24 @@ export function SectionOdoo({
     Record<string, CreateResult | { error: string }>
   >({});
 
+  const subStepStatuses = [
+    {
+      label: "Client Verification",
+      state: crossCheck?.customer ? (crossCheck.customer.matched ? "Complete" : "Needs attention") : "Not started",
+      variant: crossCheck?.customer ? (crossCheck.customer.matched ? "success" : "warning") : "neutral",
+    },
+    {
+      label: "Part Master Sync",
+      state: crossCheck?.parts?.length ? "Ready" : "Not started",
+      variant: crossCheck?.parts?.length ? "success" : "neutral",
+    },
+    {
+      label: "Export Quotation",
+      state: extraction?.parts?.length ? "Ready" : "Pending",
+      variant: extraction?.parts?.length ? "success" : "neutral",
+    },
+  ];
+
   const handleDownloadCsv = () => {
     if (!extraction?.parts?.length) return;
     const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
@@ -176,6 +194,15 @@ export function SectionOdoo({
           )}
         </div>
         <Badge variant="neutral">BU: OC Custom Coating</Badge>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {subStepStatuses.map((step) => (
+          <div key={step.label} className="flex items-center gap-2 rounded-full border border-border bg-surface px-2.5 py-1.5 text-xs">
+            <span className="font-medium text-foreground">{step.label}</span>
+            <Badge variant={step.variant as "success" | "warning" | "neutral"}>{step.state}</Badge>
+          </div>
+        ))}
       </div>
 
       {error ? (
