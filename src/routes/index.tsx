@@ -251,8 +251,17 @@ function QuotePilot() {
                 extraction={extraction}
                 quoteNumber={draftSequenceId}
                 businessUnit={businessUnit}
-                onSyncComplete={(odooName) => {
+                onSyncComplete={(odooName, nextSeq) => {
                   setOdooOrderId(odooName);
+                  if (nextSeq) {
+                    setDraftSequenceId(nextSeq);
+                  } else {
+                    void fetch(`${apiUrl()}/api/quotes/current-sequence`)
+                      .then((r) => r.json())
+                      .then((data) => {
+                        if (data?.draftSequenceId) setDraftSequenceId(data.draftSequenceId);
+                      });
+                  }
                 }}
               />
             ) : null}

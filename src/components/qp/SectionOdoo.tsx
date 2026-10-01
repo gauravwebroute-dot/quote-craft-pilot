@@ -115,7 +115,7 @@ export function SectionOdoo({
   extraction?: ExtractionResult | null;
   quoteNumber?: string;
   businessUnit?: string;
-  onSyncComplete?: (odooOrderName: string) => void;
+  onSyncComplete?: (odooOrderName: string, nextDraftSeq?: string) => void;
 }) {
   const [crossCheck, setCrossCheck] = useState<CrossCheckResult | null>(null);
   const [isChecking, setIsChecking] = useState(false);
@@ -228,20 +228,29 @@ export function SectionOdoo({
       setSyncedOrder(createdOrderName);
 
       // Record Mode A terminal action: locked in DB & transitioned ID with full payload
-      await fetch(`${apiUrl()}/api/quotes/terminal-action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draftSequenceId: quoteNumber,
-          action: "ODOO_SYNC",
-          odooSequenceId: createdOrderName,
-          customer: extraction.customer,
-          parts: extraction.parts,
-          formPayload: extraction,
-        }),
-      });
+      let nextSeq: string | undefined;
+      try {
+        const termRes = await fetch(`${apiUrl()}/api/quotes/terminal-action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            draftSequenceId: quoteNumber,
+            action: "ODOO_SYNC",
+            odooSequenceId: createdOrderName,
+            customer: extraction.customer,
+            parts: extraction.parts,
+            formPayload: extraction,
+          }),
+        });
+        if (termRes.ok) {
+          const termData = await termRes.json();
+          nextSeq = termData.nextDraftSequenceId;
+        }
+      } catch (termErr) {
+        console.warn("Terminal action sync note:", termErr);
+      }
 
-      onSyncComplete?.(createdOrderName);
+      onSyncComplete?.(createdOrderName, nextSeq);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to sync quotation with Odoo.");
     } finally {

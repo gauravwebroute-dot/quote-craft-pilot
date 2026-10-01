@@ -120,21 +120,48 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     return new Date().getFullYear().toString().slice(-2);
   }
 
-  function getNextDraftSequenceId(year = getCurrentYearStr()) {
-    const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
-    const nextSeq = (row ? Number(row.last_sequence) : 0) + 1;
-    return `QP${year}-${String(nextSeq).padStart(4, '0')}`;
+  function getMaxSequenceNumber(year = getCurrentYearStr()) {
+    let counterSeq = 0;
+    try {
+      const counterRow = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
+      if (counterRow) counterSeq = Number(counterRow.last_sequence) || 0;
+    } catch {
+      // ignore
+    }
+
+    let maxTableSeq = 0;
+    try {
+      const rows = db.prepare('SELECT draft_sequence_id FROM quotes WHERE draft_sequence_id LIKE ?').all(`QP${year}-%`);
+      for (const r of rows) {
+        const parts = String(r.draft_sequence_id).split('-');
+        const num = parseInt(parts[1] || '0', 10);
+        if (!isNaN(num) && num > maxTableSeq) {
+          maxTableSeq = num;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return Math.max(counterSeq, maxTableSeq);
   }
 
   function getCurrentDraftSequenceId(year = getCurrentYearStr()) {
-    const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
-    const nextSeq = (row ? Number(row.last_sequence) : 0) + 1;
+    const maxSeq = getMaxSequenceNumber(year);
+    const nextSeq = maxSeq + 1;
+    return `QP${year}-${String(nextSeq).padStart(4, '0')}`;
+  }
+
+  function getNextDraftSequenceId(year = getCurrentYearStr()) {
+    const maxSeq = getMaxSequenceNumber(year);
+    const nextSeq = maxSeq + 1;
     return `QP${year}-${String(nextSeq).padStart(4, '0')}`;
   }
 
   function advanceSequenceCounter(year = getCurrentYearStr()) {
+    const maxSeq = getMaxSequenceNumber(year);
+    const nextSeq = maxSeq + 1;
     const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(year);
-    const nextSeq = (row ? Number(row.last_sequence) : 0) + 1;
     if (row) {
       db.prepare('UPDATE quote_counters SET last_sequence = ? WHERE year = ?').run(nextSeq, year);
     } else {
@@ -268,39 +295,72 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     } else {
       // Ensure counter tracks this sequence
       const seqPart = parseInt(assignedDraftId.split('-')[1] || '0', 10);
-      const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(yearStr);
-      if (!row || Number(row.last_sequence) < seqPart) {
-        if (row) {
-          db.prepare('UPDATE quote_counters SET last_sequence = ? WHERE year = ?').run(seqPart, yearStr);
-        } else {
-          db.prepare('INSERT INTO quote_counters (year, last_sequence) VALUES (?, ?)').run(yearStr, seqPart);
+      if (!isNaN(seqPart) && seqPart > 0) {
+        const row = db.prepare('SELECT last_sequence FROM quote_counters WHERE year = ?').get(yearStr);
+        if (!row || Number(row.last_sequence) < seqPart) {
+          if (row) {
+            db.prepare('UPDATE quote_counters SET last_sequence = ? WHERE year = ?').run(seqPart, yearStr);
+          } else {
+            db.prepare('INSERT INTO quote_counters (year, last_sequence) VALUES (?, ?)').run(yearStr, seqPart);
+          }
         }
       }
     }
 
     const now = new Date().toISOString();
-    const insertQuote = db.prepare(`
-      INSERT INTO quotes (
-        draft_sequence_id, odoo_sequence_id, business_unit, customer_name,
-        customer_email, pdf_sha256, source_file, form_payload, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const existingQuote = db.prepare('SELECT id FROM quotes WHERE draft_sequence_id = ?').get(assignedDraftId);
+    let quoteId;
 
-    const result = insertQuote.run(
-      assignedDraftId,
-      odooSequenceId,
-      businessUnit,
-      customerName,
-      customerEmail,
-      normalizedHash,
-      sourceFile || null,
-      JSON.stringify(fullPayload),
-      status,
-      now,
-      now,
-    );
+    if (existingQuote) {
+      quoteId = Number(existingQuote.id);
+      db.prepare(`
+        UPDATE quotes
+        SET odoo_sequence_id = COALESCE(?, odoo_sequence_id),
+            business_unit = ?,
+            customer_name = ?,
+            customer_email = ?,
+            pdf_sha256 = ?,
+            source_file = COALESCE(?, source_file),
+            form_payload = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        odooSequenceId || null,
+        businessUnit,
+        customerName,
+        customerEmail,
+        normalizedHash,
+        sourceFile || null,
+        JSON.stringify(fullPayload),
+        status,
+        quoteId,
+      );
+      // Clean previous line items for upsert
+      db.prepare('DELETE FROM quote_line_items WHERE quote_id = ?').run(quoteId);
+    } else {
+      const insertQuote = db.prepare(`
+        INSERT INTO quotes (
+          draft_sequence_id, odoo_sequence_id, business_unit, customer_name,
+          customer_email, pdf_sha256, source_file, form_payload, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    const quoteId = Number(result.lastInsertRowid);
+      const result = insertQuote.run(
+        assignedDraftId,
+        odooSequenceId,
+        businessUnit,
+        customerName,
+        customerEmail,
+        normalizedHash,
+        sourceFile || null,
+        JSON.stringify(fullPayload),
+        status,
+        now,
+        now,
+      );
+      quoteId = Number(result.lastInsertRowid);
+    }
 
     // Insert line items
     if (Array.isArray(parts) && parts.length > 0) {
