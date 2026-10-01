@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import { searchLocalQuotes, getLocalQuotes } from "@/lib/localQuoteStore";
 
 export type QuoteRecord = {
   id: number;
@@ -77,17 +78,47 @@ export function QuoteHistoryDialog({
   const fetchQuotes = async () => {
     setLoading(true);
     try {
+      // 1. Local Browser Storage
+      const localResults = searchLocalQuotes(searchQuery, selectedBU, selectedStatus);
+
+      // 2. Remote Backend / Odoo Dual-Source
       const params = new URLSearchParams();
       if (searchQuery.trim()) params.set("q", searchQuery.trim());
       if (selectedBU !== "all") params.set("businessUnit", selectedBU);
       if (selectedStatus !== "all") params.set("status", selectedStatus);
 
-      const url = `${apiUrl()}/api/quotes/search?${params.toString()}`;
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setQuotes(data.quotes || []);
+      let remoteQuotes: QuoteRecord[] = [];
+      try {
+        const url = `${apiUrl()}/api/quotes/search?${params.toString()}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          remoteQuotes = data.quotes || [];
+        }
+      } catch (backendErr) {
+        console.warn("Remote search fallback to local store:", backendErr);
       }
+
+      // Merge and deduplicate
+      const map = new Map<string, QuoteRecord>();
+      for (const l of localResults) {
+        map.set(l.odooSequenceId || l.draftSequenceId, l);
+      }
+      for (const r of remoteQuotes) {
+        const key = r.odooSequenceId || r.draftSequenceId;
+        if (!map.has(key)) {
+          map.set(key, r);
+        } else {
+          const existing = map.get(key)!;
+          if (r.odooSequenceId) existing.odooSequenceId = r.odooSequenceId;
+          if (r.status) existing.status = r.status;
+        }
+      }
+
+      const merged = Array.from(map.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      setQuotes(merged);
     } catch (err) {
       console.error("Failed to load quote history:", err);
     } finally {
@@ -103,6 +134,17 @@ export function QuoteHistoryDialog({
 
   const handleRehydrate = async (quote: QuoteRecord) => {
     try {
+      // Try local storage first for instant load
+      const allLocal = getLocalQuotes();
+      const localMatch = allLocal.find(
+        (l) => l.draftSequenceId === quote.draftSequenceId || (quote.odooSequenceId && l.odooSequenceId === quote.odooSequenceId)
+      );
+      if (localMatch?.formPayload) {
+        onRehydrateState(quote, localMatch.formPayload);
+        onOpenChange(false);
+        return;
+      }
+
       const response = await fetch(`${apiUrl()}/api/quotes/${quote.id}`);
       if (!response.ok) throw new Error("Could not fetch quote state.");
       const data = await response.json();

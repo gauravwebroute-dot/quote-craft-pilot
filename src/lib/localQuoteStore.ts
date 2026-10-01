@@ -1,0 +1,136 @@
+import type { ExtractionResult } from "@/components/qp/SectionInput";
+import type { QuoteRecord } from "@/components/qp/QuoteHistoryDialog";
+
+const STORAGE_KEY_QUOTES = "quotepilot_quotes_v1";
+const STORAGE_KEY_SEQ = "quotepilot_seq_counter_v1";
+
+function getCurrentYear(): string {
+  return new Date().getFullYear().toString().slice(-2);
+}
+
+export function getLocalSequence(): string {
+  if (typeof window === "undefined") return `QP${getCurrentYear()}-0001`;
+  const stored = localStorage.getItem(STORAGE_KEY_SEQ);
+  if (stored && /^QP\d{2}-\d{4}$/.test(stored)) {
+    return stored;
+  }
+  const quotes = getLocalQuotes();
+  let maxNum = 0;
+  const year = getCurrentYear();
+  for (const q of quotes) {
+    const parts = (q.draftSequenceId || "").split("-");
+    const num = parseInt(parts[1] || "0", 10);
+    if (!isNaN(num) && num > maxNum) maxNum = num;
+  }
+  const nextSeq = `QP${year}-${String(maxNum + 1).padStart(4, "0")}`;
+  localStorage.setItem(STORAGE_KEY_SEQ, nextSeq);
+  return nextSeq;
+}
+
+export function advanceLocalSequence(): string {
+  if (typeof window === "undefined") return `QP${getCurrentYear()}-0002`;
+  const current = getLocalSequence();
+  const parts = current.split("-");
+  const year = parts[0]?.replace("QP", "") || getCurrentYear();
+  const num = parseInt(parts[1] || "1", 10);
+  const nextSeq = `QP${year}-${String(num + 1).padStart(4, "0")}`;
+  localStorage.setItem(STORAGE_KEY_SEQ, nextSeq);
+  return nextSeq;
+}
+
+export function setLocalSequence(seq: string): void {
+  if (typeof window !== "undefined" && seq) {
+    localStorage.setItem(STORAGE_KEY_SEQ, seq);
+  }
+}
+
+export interface StoredQuoteItem extends QuoteRecord {
+  formPayload?: ExtractionResult;
+}
+
+export function getLocalQuotes(): StoredQuoteItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_QUOTES);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalQuote(quote: Partial<StoredQuoteItem> & { draftSequenceId: string }): StoredQuoteItem {
+  if (typeof window === "undefined") {
+    return quote as StoredQuoteItem;
+  }
+  const quotes = getLocalQuotes();
+  const existingIdx = quotes.findIndex(
+    (q) => q.draftSequenceId === quote.draftSequenceId || (quote.odooSequenceId && q.odooSequenceId === quote.odooSequenceId)
+  );
+
+  const fullRecord: StoredQuoteItem = {
+    id: existingIdx >= 0 ? quotes[existingIdx].id : Date.now(),
+    draftSequenceId: quote.draftSequenceId,
+    quoteNumber: quote.quoteNumber || quote.draftSequenceId,
+    odooSequenceId: quote.odooSequenceId || (existingIdx >= 0 ? quotes[existingIdx].odooSequenceId : null),
+    businessUnit: quote.businessUnit || (existingIdx >= 0 ? quotes[existingIdx].businessUnit : "OC Custom Coating"),
+    customerName: quote.customerName || (existingIdx >= 0 ? quotes[existingIdx].customerName : "Standard Customer"),
+    customerEmail: quote.customerEmail || null,
+    pdfHash: quote.pdfHash || null,
+    sourceFile: quote.sourceFile || null,
+    status: quote.status || (existingIdx >= 0 ? quotes[existingIdx].status : "DRAFT"),
+    createdAt: existingIdx >= 0 ? quotes[existingIdx].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    revisionCount: existingIdx >= 0 ? quotes[existingIdx].revisionCount : 1,
+    lineItemCount: quote.formPayload?.parts?.length || (existingIdx >= 0 ? quotes[existingIdx].lineItemCount : 1),
+    formPayload: quote.formPayload || (existingIdx >= 0 ? quotes[existingIdx].formPayload : undefined),
+  };
+
+  if (existingIdx >= 0) {
+    quotes[existingIdx] = fullRecord;
+  } else {
+    quotes.unshift(fullRecord);
+  }
+
+  localStorage.setItem(STORAGE_KEY_QUOTES, JSON.stringify(quotes));
+
+  // Advance sequence counter if this was synced or exported
+  if (fullRecord.status === "SYNCED" || fullRecord.status === "EXCEL_EXPORTED") {
+    advanceLocalSequence();
+  }
+
+  return fullRecord;
+}
+
+export function searchLocalQuotes(query = "", businessUnit = "all", status = "all"): StoredQuoteItem[] {
+  const quotes = getLocalQuotes();
+  const q = query.trim().toLowerCase();
+
+  return quotes.filter((item) => {
+    if (q) {
+      const matchSeq = item.draftSequenceId?.toLowerCase().includes(q);
+      const matchOdoo = item.odooSequenceId?.toLowerCase().includes(q);
+      const matchCust = item.customerName?.toLowerCase().includes(q);
+      const matchFile = item.sourceFile?.toLowerCase().includes(q);
+      const matchParts = item.formPayload?.parts?.some(
+        (p) => p.partNumber?.toLowerCase().includes(q) || p.partName?.toLowerCase().includes(q)
+      );
+      if (!matchSeq && !matchOdoo && !matchCust && !matchFile && !matchParts) {
+        return false;
+      }
+    }
+
+    if (businessUnit && businessUnit !== "all") {
+      if (!item.businessUnit?.toLowerCase().includes(businessUnit.toLowerCase())) {
+        return false;
+      }
+    }
+
+    if (status && status !== "all") {
+      if (item.status?.toUpperCase() !== status.toUpperCase()) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}

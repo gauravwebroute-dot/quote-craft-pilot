@@ -33,6 +33,7 @@ import {
 import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import { saveLocalQuote, advanceLocalSequence } from "@/lib/localQuoteStore";
 
 type PartCrossCheck = {
   partNumber: string | null;
@@ -192,7 +193,19 @@ export function SectionOdoo({
     const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
     downloadOdooCsv(extraction.parts, customer, null, `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`);
 
-    // Record terminal export action (Mode B) with full payload preservation
+    // 1. Save locally
+    if (quoteNumber) {
+      saveLocalQuote({
+        draftSequenceId: quoteNumber,
+        status: "EXCEL_EXPORTED",
+        customerName: customer,
+        businessUnit,
+        formPayload: extraction,
+      });
+      advanceLocalSequence();
+    }
+
+    // 2. Record terminal export action (Mode B) with full payload preservation
     void fetch(`${apiUrl()}/api/quotes/terminal-action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -227,8 +240,20 @@ export function SectionOdoo({
       const createdOrderName = payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
       setSyncedOrder(createdOrderName);
 
-      // Record Mode A terminal action: locked in DB & transitioned ID with full payload
-      let nextSeq: string | undefined;
+      // 1. Save to local browser storage immediately
+      let nextSeq = advanceLocalSequence();
+      if (quoteNumber) {
+        saveLocalQuote({
+          draftSequenceId: quoteNumber,
+          odooSequenceId: createdOrderName,
+          status: "SYNCED",
+          customerName: extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
+          businessUnit,
+          formPayload: extraction,
+        });
+      }
+
+      // 2. Record Mode A terminal action: locked in DB & transitioned ID with full payload
       try {
         const termRes = await fetch(`${apiUrl()}/api/quotes/terminal-action`, {
           method: "POST",
@@ -244,7 +269,9 @@ export function SectionOdoo({
         });
         if (termRes.ok) {
           const termData = await termRes.json();
-          nextSeq = termData.nextDraftSequenceId;
+          if (termData.nextDraftSequenceId) {
+            nextSeq = termData.nextDraftSequenceId;
+          }
         }
       } catch (termErr) {
         console.warn("Terminal action sync note:", termErr);

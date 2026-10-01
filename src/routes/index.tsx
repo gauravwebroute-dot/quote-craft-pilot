@@ -7,6 +7,12 @@ import { SectionExtraction } from "@/components/qp/SectionExtraction";
 import { SectionOdoo } from "@/components/qp/SectionOdoo";
 import { TreeMenu, type NavigationTarget } from "@/components/qp/TreeMenu";
 import { QuoteHistoryDialog, type QuoteRecord } from "@/components/qp/QuoteHistoryDialog";
+import {
+  getLocalSequence,
+  advanceLocalSequence,
+  setLocalSequence,
+  saveLocalQuote,
+} from "@/lib/localQuoteStore";
 import { Button } from "@/components/ui/button";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
@@ -50,12 +56,10 @@ function QuotePilot() {
   const [businessUnit, setBusinessUnit] = useState("OC Custom Coating");
 
   // Dynamic cross-session quote sequence ID (REQ-002, Section 2)
-  const [draftSequenceId, setDraftSequenceId] = useState<string>(
-    `QP${new Date().getFullYear().toString().slice(-2)}-0001`,
-  );
+  const [draftSequenceId, setDraftSequenceId] = useState<string>(() => getLocalSequence());
   const [odooOrderId, setOdooOrderId] = useState<string | null>(null);
 
-  // Fetch current draft sequence on mount
+  // Fetch current draft sequence on mount and sync with backend
   useEffect(() => {
     let cancelled = false;
     const fetchSequence = async () => {
@@ -65,6 +69,7 @@ function QuotePilot() {
           const data = await response.json();
           if (data?.draftSequenceId && !cancelled) {
             setDraftSequenceId(data.draftSequenceId);
+            setLocalSequence(data.draftSequenceId);
           }
         }
       } catch (err) {
@@ -103,6 +108,11 @@ function QuotePilot() {
 
   // Trigger New Quote: advances sequence counter atomically (REQ-002, Section 2.1)
   const handleNewQuote = async () => {
+    // 1. Instantly advance client local sequence
+    const nextLocal = advanceLocalSequence();
+    setDraftSequenceId(nextLocal);
+
+    // 2. Sync backend counter
     try {
       const response = await fetch(`${apiUrl()}/api/quotes/next-sequence`, {
         method: "POST",
@@ -111,10 +121,11 @@ function QuotePilot() {
         const data = await response.json();
         if (data?.draftSequenceId) {
           setDraftSequenceId(data.draftSequenceId);
+          setLocalSequence(data.draftSequenceId);
         }
       }
     } catch (err) {
-      console.warn("Could not advance sequence counter:", err);
+      console.warn("Could not advance sequence counter on backend:", err);
     }
 
     setExtraction(null);
@@ -127,6 +138,16 @@ function QuotePilot() {
   // Save Draft (retains draft sequence ID without advancing, per Section 2.1 #2)
   const handleSaveDraft = async () => {
     if (!extraction) return;
+    saveLocalQuote({
+      draftSequenceId,
+      businessUnit,
+      customerName: extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
+      customerEmail: extraction.customer?.email || null,
+      sourceFile: uploadedFiles[0]?.name || "manual_draft.pdf",
+      formPayload: extraction,
+      status: "DRAFT",
+    });
+
     try {
       await fetch(`${apiUrl()}/api/quotes/save`, {
         method: "POST",
@@ -143,7 +164,8 @@ function QuotePilot() {
       });
       alert(`Draft ${draftSequenceId} saved successfully.`);
     } catch (err) {
-      console.error("Failed to save draft:", err);
+      console.error("Failed to save draft on backend:", err);
+      alert(`Draft ${draftSequenceId} saved locally.`);
     }
   };
 
