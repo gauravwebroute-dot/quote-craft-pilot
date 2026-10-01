@@ -204,7 +204,11 @@ function QuotePilot() {
 
           {/* Main Workspace / Section Content */}
           <div className="min-w-0 flex-1 space-y-6">
-            <RfqHeader extraction={extraction} />
+            <RfqHeader
+              extraction={extraction}
+              quoteNumber={activeQuoteNumber}
+              businessUnit={businessUnit}
+            />
 
             {step === 0 ? (
               <SectionInput
