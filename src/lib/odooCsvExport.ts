@@ -57,18 +57,22 @@ export function mapQuotePilotToOdooCsv(
 
     const pricePerSi = isMaskingNeeded ? 0.46 : 0.40;
 
-    const description = part.partName || part.partSummary || part.partNumber || "Coating Line Item";
+    const baseName = part.partName || part.partSummary || part.partNumber || "Coating Line Item";
     const partNumber = part.partNumber || "";
     const rev = part.revision || "";
     const quantity = Number(part.quantity) || 1;
+    const effectiveArea = coatingSqIn > 0 ? coatingSqIn : totalArea;
+    const maskText = maskingSqIn > 0 ? ` | Masking: ${maskingSqIn} si` : "";
+    const specText = part.milSpecNotes || part.specifications ? ` | Specs: ${part.milSpecNotes || part.specifications}` : "";
+    const fullDescription = `${baseName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} +temp test`;
 
     return {
       "Customer": customer,
       "Customer Reference": partNumber,
       "Order Lines/Products": partNumber,
-      "Order Lines/Description": description,
+      "Order Lines/Description": fullDescription,
       "Order Lines/x_rev": rev,
-      "Order Lines/x_sq_in_per_unit": coatingSqIn > 0 ? coatingSqIn : totalArea,
+      "Order Lines/x_sq_in_per_unit": effectiveArea,
       "Order Lines/x_work_type": workType,
       "Order Lines/x_price_per_si": pricePerSi,
       "Order Lines/Unit Price": Number(unitPrice.toFixed(2)),

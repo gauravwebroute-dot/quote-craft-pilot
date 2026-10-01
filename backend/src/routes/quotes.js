@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { defaultQuoteStore, hashPayload } from '../lib/quoteStore.js';
+import { searchLiveOdooQuotes, getLiveOdooQuoteDetails } from '../services/odooCrossCheck.js';
 
 const router = Router();
 
@@ -95,7 +96,16 @@ router.post('/quotes/save', (req, res) => {
 // Terminal Action Handler: Mode A (Odoo Sync) or Mode B (Excel Export) (REQ-002)
 router.post('/quotes/terminal-action', (req, res) => {
   try {
-    const { quoteId, draftSequenceId, action, odooSequenceId } = req.body ?? {};
+    const {
+      quoteId,
+      draftSequenceId,
+      action,
+      odooSequenceId,
+      customer,
+      parts,
+      formPayload,
+      businessUnit = 'OC Custom Coating',
+    } = req.body ?? {};
     const identifier = quoteId || draftSequenceId;
     if (!identifier) {
       return res.status(400).json({ error: 'MISSING_IDENTIFIER', message: 'quoteId or draftSequenceId required.' });
@@ -110,16 +120,34 @@ router.post('/quotes/terminal-action', (req, res) => {
       status = 'CROSS_CHECKED';
     }
 
-    defaultQuoteStore.updateQuoteStatus(identifier, {
-      status,
-      odooSequenceId: odooSequenceId || null,
-    });
+    const existing = defaultQuoteStore.getQuoteById(identifier);
+    if (!existing && (customer || parts || formPayload)) {
+      defaultQuoteStore.recordQuote({
+        draftSequenceId,
+        odooSequenceId: odooSequenceId || null,
+        businessUnit,
+        customer,
+        parts,
+        formPayload,
+        status,
+        forceNewQuote: true,
+      });
+    } else {
+      defaultQuoteStore.updateQuoteStatus(identifier, {
+        status,
+        odooSequenceId: odooSequenceId || null,
+      });
+    }
+
+    // Advance sequence counter for the next new quote (REQ-002, Section 2.1)
+    const nextDraftSequenceId = defaultQuoteStore.advanceSequenceCounter();
 
     return res.json({
       success: true,
       status,
       odooSequenceId: odooSequenceId || null,
-      message: `Quote status updated to ${status}.`,
+      nextDraftSequenceId,
+      message: `Quote status updated to ${status}. Next draft sequence is ${nextDraftSequenceId}.`,
     });
   } catch (error) {
     console.error('[POST /api/quotes/terminal-action] failed:', error);
@@ -137,8 +165,8 @@ router.get('/quotes/history', (_req, res) => {
   }
 });
 
-// Dual-Source Search Engine (REQ-009)
-router.get('/quotes/search', (req, res) => {
+// Dual-Source Search Engine (Local SQLite + Live Odoo ERP) (REQ-009)
+router.get('/quotes/search', async (req, res) => {
   try {
     const query = String(req.query?.q ?? '').trim();
     const businessUnit = String(req.query?.businessUnit ?? '').trim();
@@ -146,13 +174,53 @@ router.get('/quotes/search', (req, res) => {
     const startDate = String(req.query?.startDate ?? '').trim();
     const endDate = String(req.query?.endDate ?? '').trim();
 
-    const quotes = defaultQuoteStore.searchQuotes({
+    // Source 1: Local SQLite database
+    const localQuotes = defaultQuoteStore.searchQuotes({
       query,
       businessUnit,
       status,
       startDate,
       endDate,
     });
+
+    // Source 2: Live Odoo ERP
+    let odooQuotes = [];
+    try {
+      odooQuotes = await searchLiveOdooQuotes({
+        query,
+        businessUnit,
+        status,
+        startDate,
+        endDate,
+      });
+    } catch (odooSearchErr) {
+      console.warn('Odoo live search fallback:', odooSearchErr.message);
+    }
+
+    // Merge and deduplicate dual sources
+    const mergedMap = new Map();
+
+    // Add local records first
+    for (const q of localQuotes) {
+      mergedMap.set(q.odooSequenceId || q.draftSequenceId, q);
+    }
+
+    // Add Odoo records if not already present or augment with live data
+    for (const o of odooQuotes) {
+      const key = o.odooSequenceId || o.draftSequenceId;
+      if (!mergedMap.has(key)) {
+        mergedMap.set(key, o);
+      } else {
+        const existing = mergedMap.get(key);
+        if (!existing.odooSequenceId) {
+          existing.odooSequenceId = o.odooSequenceId;
+        }
+      }
+    }
+
+    const quotes = Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
 
     return res.json({ quotes });
   } catch (error) {
@@ -161,11 +229,17 @@ router.get('/quotes/search', (req, res) => {
   }
 });
 
-// Get Single Quote by ID or Draft Sequence ID (For State Rehydration)
-router.get('/quotes/:id', (req, res) => {
+// Get Single Quote by ID, Draft Sequence ID, or Odoo Sequence ID (For State Rehydration)
+router.get('/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const quote = defaultQuoteStore.getQuoteById(id);
+    let quote = defaultQuoteStore.getQuoteById(id);
+
+    // If not found in SQLite or is an Odoo ID, search live Odoo
+    if (!quote) {
+      quote = await getLiveOdooQuoteDetails(id);
+    }
+
     if (!quote) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Quote not found.' });
     }

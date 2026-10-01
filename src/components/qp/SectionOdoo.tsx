@@ -192,13 +192,16 @@ export function SectionOdoo({
     const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
     downloadOdooCsv(extraction.parts, customer, null, `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`);
 
-    // Record terminal export action (Mode B)
+    // Record terminal export action (Mode B) with full payload preservation
     void fetch(`${apiUrl()}/api/quotes/terminal-action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         draftSequenceId: quoteNumber,
         action: "EXCEL_EXPORT",
+        customer: extraction.customer,
+        parts: extraction.parts,
+        formPayload: extraction,
       }),
     });
   };
@@ -214,7 +217,7 @@ export function SectionOdoo({
         body: JSON.stringify({
           customer: extraction.customer,
           parts: extraction.parts,
-          formPayload: extraction,
+          formPayload: { ...extraction, draftSequenceId: quoteNumber },
           confirm: true,
         }),
       });
@@ -224,7 +227,7 @@ export function SectionOdoo({
       const createdOrderName = payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
       setSyncedOrder(createdOrderName);
 
-      // Record Mode A terminal action: locked in DB & transitioned ID
+      // Record Mode A terminal action: locked in DB & transitioned ID with full payload
       await fetch(`${apiUrl()}/api/quotes/terminal-action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -232,6 +235,9 @@ export function SectionOdoo({
           draftSequenceId: quoteNumber,
           action: "ODOO_SYNC",
           odooSequenceId: createdOrderName,
+          customer: extraction.customer,
+          parts: extraction.parts,
+          formPayload: extraction,
         }),
       });
 

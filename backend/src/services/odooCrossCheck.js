@@ -225,22 +225,35 @@ async function crossCheckLiveOdoo({ customer, parts }) {
   };
 }
 
-async function resolveTestCompanyId(uid) {
+async function resolveTestCompanyId(uid, companyName = null) {
+  const targetName = companyName || TEST_COMPANY_NAME;
   const companies = await odooCall("object", "execute_kw", [
     process.env.ODOO_DB,
     uid,
     process.env.ODOO_API_KEY,
     "res.company",
     "search_read",
-    [[["name", "=", TEST_COMPANY_NAME]]],
-    { fields: ["id"], limit: 1 },
+    [[["name", "ilike", targetName]]],
+    { fields: ["id", "name"], limit: 1 },
   ]);
-  if (companies.length === 0) {
-    throw new Error(
-      `Test company "${TEST_COMPANY_NAME}" was not found in Odoo. Check the exact spelling of the company name.`,
-    );
+  if (companies.length > 0) {
+    return companies[0].id;
   }
-  return companies[0].id;
+
+  // Fallback to any available company in Odoo
+  const allCompanies = await odooCall("object", "execute_kw", [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_API_KEY,
+    "res.company",
+    "search_read",
+    [[]],
+    { fields: ["id", "name"], limit: 1 },
+  ]);
+  if (allCompanies.length > 0) {
+    return allCompanies[0].id;
+  }
+  return 1;
 }
 
 async function resolveTestTagId(uid) {
@@ -340,6 +353,239 @@ function normalizeOdooUrl(value) {
     throw new Error("Invalid ODOO_URL. Set it to the base URL, for example https://yourcompany.odoo.com.");
   }
   return url;
+}
+
+export async function searchLiveOdooQuotes({ query = '', businessUnit = '', status = '', startDate = '', endDate = '' } = {}) {
+  if (!isLiveConfigured()) return [];
+  try {
+    const uid = await odooAuth();
+    const domain = [];
+
+    if (query) {
+      domain.push(
+        "|", "|", "|",
+        ["name", "ilike", query],
+        ["client_order_ref", "ilike", query],
+        ["partner_id.name", "ilike", query],
+        ["note", "ilike", query]
+      );
+    }
+
+    if (businessUnit && businessUnit !== 'all') {
+      domain.push(["company_id.name", "ilike", businessUnit]);
+    }
+
+    if (startDate) {
+      domain.push(["date_order", ">=", startDate]);
+    }
+    if (endDate) {
+      domain.push(["date_order", "<=", endDate]);
+    }
+
+    const orders = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "sale.order",
+      "search_read",
+      [domain],
+      {
+        fields: [
+          "id",
+          "name",
+          "client_order_ref",
+          "partner_id",
+          "company_id",
+          "date_order",
+          "create_date",
+          "state",
+          "amount_total",
+          "order_line",
+          "note",
+        ],
+        limit: 50,
+        order: "id desc",
+      },
+    ]);
+
+    return orders.map((o) => {
+      const isDraftOrSent = o.state === 'draft' || o.state === 'sent';
+      const statusLabel = isDraftOrSent ? 'SYNCED' : o.state === 'sale' ? 'CONFIRMED' : o.state ? o.state.toUpperCase() : 'SYNCED';
+      const lineCount = Array.isArray(o.order_line) ? o.order_line.length : 0;
+      return {
+        id: `odoo-${o.id}`,
+        odooId: o.id,
+        draftSequenceId: o.client_order_ref || o.name,
+        quoteNumber: o.name,
+        odooSequenceId: o.name,
+        businessUnit: o.company_id?.[1] || 'OC Custom Coating',
+        customerName: o.partner_id?.[1] || 'Standard Customer',
+        customerEmail: null,
+        pdfHash: null,
+        sourceFile: `Odoo Quotation ${o.name}`,
+        status: statusLabel,
+        createdAt: o.create_date || o.date_order || new Date().toISOString(),
+        updatedAt: o.date_order || o.create_date || new Date().toISOString(),
+        revisionCount: 1,
+        lineItemCount: lineCount,
+        isOdooLive: true,
+      };
+    });
+  } catch (err) {
+    console.warn('[searchLiveOdooQuotes] failed:', err.message);
+    return [];
+  }
+}
+
+export async function getLiveOdooQuoteDetails(idOrName) {
+  if (!isLiveConfigured()) return null;
+  try {
+    const uid = await odooAuth();
+    const cleanId = String(idOrName).startsWith('odoo-') ? parseInt(String(idOrName).replace('odoo-', ''), 10) : null;
+    const domain = cleanId ? [[["id", "=", cleanId]]] : [[["name", "=", idOrName]]];
+
+    const orders = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "sale.order",
+      "search_read",
+      domain,
+      {
+        fields: [
+          "id",
+          "name",
+          "client_order_ref",
+          "partner_id",
+          "company_id",
+          "date_order",
+          "create_date",
+          "state",
+          "amount_total",
+          "order_line",
+          "note",
+        ],
+        limit: 1,
+      },
+    ]);
+
+    if (!orders || orders.length === 0) return null;
+    const order = orders[0];
+
+    let lineItems = [];
+    if (Array.isArray(order.order_line) && order.order_line.length > 0) {
+      try {
+        lineItems = await odooCall("object", "execute_kw", [
+          process.env.ODOO_DB,
+          uid,
+          process.env.ODOO_API_KEY,
+          "sale.order.line",
+          "search_read",
+          [[["id", "in", order.order_line]]],
+          {
+            fields: ["id", "name", "price_unit", "product_uom_qty", "price_subtotal", "product_id"],
+            limit: 100,
+          },
+        ]);
+      } catch (lineErr) {
+        console.warn('Failed to read order lines:', lineErr.message);
+      }
+    }
+
+    let storedPayload = null;
+    try {
+      const customData = await odooCall("object", "execute_kw", [
+        process.env.ODOO_DB,
+        uid,
+        process.env.ODOO_API_KEY,
+        "sale.order",
+        "read",
+        [[order.id]],
+        { fields: ["x_quotepilot_json"] },
+      ]);
+      if (customData?.[0]?.x_quotepilot_json) {
+        storedPayload = typeof customData[0].x_quotepilot_json === 'string'
+          ? JSON.parse(customData[0].x_quotepilot_json)
+          : customData[0].x_quotepilot_json;
+      }
+    } catch {
+      // Field might not exist
+    }
+
+    const parts = lineItems.map((l, index) => {
+      const desc = l.name || `Line Item ${index + 1}`;
+      const areaMatch = desc.match(/--\s*([\d.]+)\s*si/i);
+      const areaSqIn = areaMatch ? parseFloat(areaMatch[1]) : 0;
+      const partNumMatch = desc.match(/^([^,-]+)/);
+      const partNum = l.product_id?.[1] || (partNumMatch ? partNumMatch[1].trim() : `PART-${index + 1}`);
+
+      return {
+        id: `odoo-line-${l.id}`,
+        partNumber: partNum,
+        partName: desc.replace(/\s*\+temp test.*/, '').trim(),
+        partSummary: desc,
+        revision: "A00",
+        quantity: Number(l.product_uom_qty) || 1,
+        totalSurfaceAreaSqIn: areaSqIn,
+        coatingAreaSqIn: areaSqIn,
+        maskingAreaSqIn: 0,
+        pricePerSi: 0.40,
+        priceUnit: Number(l.price_unit) || 0,
+        totalPrice: Number(l.price_subtotal) || (Number(l.price_unit) * Number(l.product_uom_qty)),
+        coatingBom: {
+          topcoat: "Cerakote",
+          primer: "N/A",
+          pretreatment: "Degrease & Blast",
+        },
+        pricingBreakdown: {
+          baseCost: Number(l.price_unit) || 0,
+          unitPrice: Number(l.price_unit) || 0,
+          totalCost: Number(l.price_subtotal) || 0,
+        },
+      };
+    });
+
+    const formPayload = storedPayload || {
+      customer: {
+        company: order.partner_id?.[1] || "Standard Customer",
+        contact: order.partner_id?.[1] || "Standard Customer",
+        email: null,
+      },
+      parts,
+      sourceDrawingFile: `Odoo ${order.name}`,
+    };
+
+    return {
+      id: `odoo-${order.id}`,
+      draftSequenceId: order.client_order_ref || order.name,
+      quoteNumber: order.name,
+      odooSequenceId: order.name,
+      businessUnit: order.company_id?.[1] || "OC Custom Coating",
+      customerName: order.partner_id?.[1] || "Standard Customer",
+      customerEmail: null,
+      pdfHash: null,
+      sourceFile: `Odoo Quotation ${order.name}`,
+      status: order.state === "draft" || order.state === "sent" ? "SYNCED" : order.state ? order.state.toUpperCase() : "SYNCED",
+      createdAt: order.create_date || order.date_order || new Date().toISOString(),
+      updatedAt: order.date_order || order.create_date || new Date().toISOString(),
+      revisionCount: 1,
+      lineItemCount: parts.length,
+      formPayload,
+      lineItems: parts,
+      revisions: [
+        {
+          revisionId: `rev-${order.id}`,
+          revisionLabel: "v1",
+          createdAt: order.create_date || new Date().toISOString(),
+          payload: formPayload,
+        },
+      ],
+      isOdooLive: true,
+    };
+  } catch (err) {
+    console.warn('[getLiveOdooQuoteDetails] failed:', err.message);
+    return null;
+  }
 }
 
 export { odooAuth, odooCall, isLiveConfigured, resolveTestCompanyId, resolveTestTagId };

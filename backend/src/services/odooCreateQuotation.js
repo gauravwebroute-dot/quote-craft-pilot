@@ -133,13 +133,34 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     partnerCreated = true;
   }
 
+  const draftRef = formPayload?.draftSequenceId || "QP26-0001";
+  const payloadBlob = JSON.stringify(formPayload || { customer, parts: toCreate.map((p) => p.original) });
+
+  // Rich notes summarizing every extracted detail (minor to major) for full visibility in Odoo
+  const noteSummary = [
+    `=== QuotePilot Complete RFQ Data [${draftRef}] ===`,
+    `Customer: ${customer.company || customer.email || "Standard Customer"} | BU: ${TEST_COMPANY_NAME}`,
+    `Extracted Line Items (${toCreate.length}):`,
+    ...toCreate.map((p, idx) => {
+      const orig = p.original || {};
+      const area = Number(orig.totalSurfaceAreaSqIn || 0);
+      const mask = Number(orig.maskingAreaSqIn || 0);
+      const topcoat = orig.coatingBom?.topcoat || orig.workType || "Coating";
+      const rev = orig.revision || "A00";
+      return `#${idx + 1}: ${orig.partNumber || "Part"} [Rev: ${rev}] - ${orig.partName || "Part"} | Surface Area: ${area} sq.in | Masking: ${mask} sq.in | Work: ${topcoat} | Specs: ${orig.milSpecNotes || orig.specifications || "Standard"}`;
+    }),
+  ].join("\n");
+
   // Build custom and standard order lines per PRD v3.0 Section 5.1
   const orderLinesWithCustomFields = toCreate.map((p) => {
     const computed = p.computedPrice?.priced !== false ? p.computedPrice : null;
     const areaSqIn = Number(p.original?.totalSurfaceAreaSqIn || 0);
-    const description = `${p.original?.partName ?? p.partNumber ?? "Part"} -- ${
+    const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
+    const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
+    const rev = p.original?.revision || "";
+    const description = `${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
-    } si ${TEST_TAG_NAME}`;
+    } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.40);
     const unitPrice = computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
 
@@ -151,7 +172,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
         product_uom_qty: p.original?.quantity ?? 1,
         price_unit: unitPrice,
         x_rev: p.original?.revision || false,
-        x_work_type: p.original?.coatingBom?.topcoat || p.original?.workType || "Coating",
+        x_work_type: workType,
         x_sq_in_per_unit: areaSqIn,
         x_price_per_si: pricePerSi,
       },
@@ -161,9 +182,12 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
   const orderLinesStandardOnly = toCreate.map((p) => {
     const computed = p.computedPrice?.priced !== false ? p.computedPrice : null;
     const areaSqIn = Number(p.original?.totalSurfaceAreaSqIn || 0);
-    const description = `${p.original?.partName ?? p.partNumber ?? "Part"} -- ${
+    const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
+    const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
+    const rev = p.original?.revision || "";
+    const description = `${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
-    } si ${TEST_TAG_NAME}`;
+    } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.40);
     const unitPrice = computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
 
@@ -177,8 +201,6 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
       },
     ];
   });
-
-  const payloadBlob = JSON.stringify(formPayload || { customer, parts: toCreate.map((p) => p.original) });
 
   let saleOrderId;
   try {
@@ -193,6 +215,8 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
         {
           partner_id: partnerId,
           company_id: companyId,
+          client_order_ref: draftRef,
+          note: noteSummary,
           tag_ids: [[6, 0, [tagId]]],
           x_quotepilot_json: payloadBlob,
           order_line: orderLinesWithCustomFields,
@@ -212,6 +236,8 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
         {
           partner_id: partnerId,
           company_id: companyId,
+          client_order_ref: draftRef,
+          note: noteSummary,
           tag_ids: [[6, 0, [tagId]]],
           order_line: orderLinesStandardOnly,
         },
@@ -226,12 +252,13 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     "sale.order",
     "read",
     [[saleOrderId]],
-    { fields: ["name"] },
+    { fields: ["name", "client_order_ref"] },
   ]);
 
   const created = {
     saleOrderId,
     saleOrderName: createdOrder?.name ?? `S${String(saleOrderId).padStart(5, "0")}`,
+    clientOrderRef: createdOrder?.client_order_ref ?? draftRef,
     company: TEST_COMPANY_NAME,
     tag: TEST_TAG_NAME,
     partnerId,
