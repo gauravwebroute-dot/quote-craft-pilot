@@ -240,20 +240,17 @@ async function resolveTestCompanyId(uid, companyName = null) {
     return companies[0].id;
   }
 
-  // Fallback to any available company in Odoo
-  const allCompanies = await odooCall("object", "execute_kw", [
-    process.env.ODOO_DB,
-    uid,
-    process.env.ODOO_API_KEY,
-    "res.company",
-    "search_read",
-    [[]],
-    { fields: ["id", "name"], limit: 1 },
-  ]);
-  if (allCompanies.length > 0) {
-    return allCompanies[0].id;
-  }
-  return 1;
+  // Deliberately NO fallback to "any available company" here. Silently
+  // picking a different company when the target one is missing (e.g. it
+  // was deleted or renamed in Odoo) is exactly how a stale/wrong company
+  // gets used for customer matching without anyone noticing - which is
+  // what caused "existing customer" to incorrectly show up even after the
+  // real test company was deleted. Fail loudly instead so the mismatch is
+  // obvious immediately, not discovered later as a wrong match.
+  throw new Error(
+    `Target company "${targetName}" was not found in Odoo (it may have been deleted or renamed). ` +
+      `Refusing to fall back to a different company - update TEST_COMPANY_NAME or recreate the company in Odoo.`,
+  );
 }
 
 async function resolveTestTagId(uid) {

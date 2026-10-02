@@ -372,15 +372,41 @@ export function SectionOdoo({
             {isChecking ? "Verifying..." : "Run Cross-Check"}
           </Button>
 
-          {/* Sync to Odoo Primary Button (REQ-008: Sync Guard Rule) */}
-          <Button
-            onClick={handleSyncToOdooAll}
-            disabled={isSyncing || !crossCheck || !allConflictsResolved || Boolean(syncedOrder)}
-            className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90 disabled:opacity-50"
-          >
-            <ShieldCheck className="size-4 mr-1.5" />
-            {isSyncing ? "Syncing..." : syncedOrder ? `Synced to Odoo (${syncedOrder})` : "Sync to Odoo"}
-          </Button>
+          {/* Sync to Odoo Primary Button (REQ-008: Sync Guard Rule) - gated behind an
+              explicit confirm dialog, same as the per-part Add flow below. This writes
+              real records to Odoo; it must never fire from a single click alone. */}
+          {syncedOrder ? (
+            <Button disabled className="bg-[#1B4332] text-white opacity-80">
+              <ShieldCheck className="size-4 mr-1.5" />
+              Synced to Odoo ({syncedOrder})
+            </Button>
+          ) : (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  disabled={isSyncing || !crossCheck || !allConflictsResolved}
+                  className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90 disabled:opacity-50"
+                >
+                  <ShieldCheck className="size-4 mr-1.5" />
+                  {isSyncing ? "Syncing..." : "Sync to Odoo"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Sync this entire quote to Odoo?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will create a new quotation in your live Odoo instance for all{" "}
+                    {extraction?.parts?.length ?? 0} part(s) in this quote. No existing Odoo
+                    record will be modified or deleted by this action.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleSyncToOdooAll}>Sync</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
 
           {extraction?.parts && extraction.parts.length > 0 && (
             <Button
