@@ -120,7 +120,25 @@ function crossCheckDummyOdoo({ customer, parts }) {
       }
     }
 
-    return buildPartResult(part, matchedCustomer, previousQuote ?? null);
+    const priceHistory = previousQuote
+      ? [{
+          saleOrderId: null,
+          saleOrderName: "S00000 (sample)",
+          quotedAt: previousQuote.quotedAt ?? null,
+          state: "draft",
+          stateLabel: "Quotation",
+          revision: previousQuote.revision ?? null,
+          quantity: Number(part.quantity ?? 1),
+          pricePerUnit: previousQuote.pricePerUnit,
+          lineTotal: Number((previousQuote.pricePerUnit * Number(part.quantity ?? 1)).toFixed(2)),
+          sqInPerUnit: null,
+          pricePerSi: null,
+          workType: null,
+          orderTotal: null,
+          currency: "USD",
+        }]
+      : [];
+    return buildPartResult(part, matchedCustomer, previousQuote ?? null, priceHistory);
   });
 
   const subChecks = {
@@ -177,45 +195,33 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = TEST_COMPANY
   const results = [];
   for (const part of parts) {
     let previousQuote = null;
+    let priceHistory = [];
     if (partner && part.partNumber) {
-      const lines = await odooCall("object", "execute_kw", [
-        process.env.ODOO_DB,
-        uid,
-        process.env.ODOO_API_KEY,
-        "sale.order.line",
-        "search_read",
-        [[
-          ["order_id.partner_id", "=", partner.id],
-          ["order_id.company_id", "=", companyId],
-          ["order_id.state", "!=", "cancel"],
-          ["name", "ilike", part.partNumber],
-        ]],
-        { fields: ["id", "name", "price_unit", "product_uom_qty", "order_id", "create_date", "x_rev"], limit: 5 },
-      ]);
-      if (lines.length > 0) {
-        const line = lines[0];
+      priceHistory = await fetchPriceHistory(uid, partner.id, companyId, part.partNumber);
+      if (priceHistory.length > 0) {
+        const latest = priceHistory[0];
         previousQuote = {
-          pricePerUnit: line.price_unit,
-          revision: line.x_rev || null,
-          quotedAt: line.create_date ? String(line.create_date).slice(0, 10) : null,
-          saleOrderId: line.order_id?.[0] ?? null,
-          saleOrderName: line.order_id?.[1] ?? null,
+          pricePerUnit: latest.pricePerUnit,
+          revision: latest.revision,
+          quotedAt: latest.quotedAt,
+          saleOrderId: latest.saleOrderId,
+          saleOrderName: latest.saleOrderName,
         };
 
-        if (part.revision && line.x_rev && part.revision !== line.x_rev) {
+        if (part.revision && latest.revision && part.revision !== latest.revision) {
           conflicts.push({
             id: `conflict-rev-${part.partNumber}`,
             partNumber: part.partNumber,
             fieldName: `Part [${part.partNumber}] Revision`,
             extractedValue: part.revision,
-            odooMasterValue: line.x_rev,
+            odooMasterValue: latest.revision,
             resolution: null,
             manualValue: "",
           });
         }
       }
     }
-    results.push(buildPartResult(part, partner, previousQuote));
+    results.push(buildPartResult(part, partner, previousQuote, priceHistory));
   }
 
   const subChecks = {
@@ -255,6 +261,100 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = TEST_COMPANY
       ? `Live customer + prior-quote lookup completed, scoped to "${businessUnit}" only.`
       : `No matching customer found under "${businessUnit}" in Odoo - this would be a new customer.`,
   };
+}
+
+const PRICE_HISTORY_LIMIT = 10;
+const STATE_LABELS = { draft: "Quotation", sent: "Quotation Sent", sale: "Sales Order", done: "Locked", cancel: "Cancelled" };
+let cachedLineFields = null;
+
+// Optional custom fields are only requested if they exist on this Odoo
+// database, so a missing field can never make the whole cross-check fail.
+async function getLineFields(uid) {
+  if (cachedLineFields) return cachedLineFields;
+  try {
+    const defs = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "sale.order.line",
+      "fields_get",
+      [],
+      { attributes: ["type"] },
+    ]);
+    cachedLineFields = new Set(Object.keys(defs || {}));
+  } catch {
+    cachedLineFields = new Set(["id", "name", "price_unit", "product_uom_qty", "order_id", "create_date", "x_rev"]);
+  }
+  return cachedLineFields;
+}
+
+/**
+ * Every earlier (non-cancelled) quote line for this customer + part number,
+ * newest first, with the quote-level context (date, status, quote total,
+ * currency) so the UI can show exactly what was quoted before. Read-only.
+ */
+async function fetchPriceHistory(uid, partnerId, companyId, partNumber) {
+  const available = await getLineFields(uid);
+  const wanted = [
+    "id", "name", "price_unit", "product_uom_qty", "price_subtotal", "order_id", "create_date",
+    "x_rev", "x_sq_in_per_unit", "x_price_per_si", "x_work_type",
+  ];
+  const fields = wanted.filter((f) => available.has(f));
+
+  const lines = await odooCall("object", "execute_kw", [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_API_KEY,
+    "sale.order.line",
+    "search_read",
+    [[
+      ["order_id.partner_id", "=", partnerId],
+      ["order_id.company_id", "=", companyId],
+      ["order_id.state", "!=", "cancel"],
+      ["name", "ilike", partNumber],
+    ]],
+    { fields, limit: PRICE_HISTORY_LIMIT, order: "create_date desc, id desc" },
+  ]);
+  if (!lines.length) return [];
+
+  const orderIds = [...new Set(lines.map((l) => l.order_id?.[0]).filter(Boolean))];
+  const orders = orderIds.length
+    ? await odooCall("object", "execute_kw", [
+        process.env.ODOO_DB,
+        uid,
+        process.env.ODOO_API_KEY,
+        "sale.order",
+        "search_read",
+        [[["id", "in", orderIds]]],
+        {
+          fields: ["id", "name", "date_order", "state", "amount_total", "currency_id"],
+          context: { allowed_company_ids: [companyId] },
+        },
+      ])
+    : [];
+  const orderById = new Map(orders.map((o) => [o.id, o]));
+
+  return lines.map((line) => {
+    const order = orderById.get(line.order_id?.[0]) ?? {};
+    const qty = Number(line.product_uom_qty ?? 0);
+    const unit = Number(line.price_unit ?? 0);
+    return {
+      saleOrderId: line.order_id?.[0] ?? null,
+      saleOrderName: line.order_id?.[1] ?? order.name ?? null,
+      quotedAt: String(order.date_order || line.create_date || "").slice(0, 10) || null,
+      state: order.state ?? null,
+      stateLabel: STATE_LABELS[order.state] ?? order.state ?? null,
+      revision: line.x_rev || null,
+      quantity: qty,
+      pricePerUnit: unit,
+      lineTotal: typeof line.price_subtotal === "number" ? line.price_subtotal : Number((unit * qty).toFixed(2)),
+      sqInPerUnit: typeof line.x_sq_in_per_unit === "number" ? line.x_sq_in_per_unit : null,
+      pricePerSi: typeof line.x_price_per_si === "number" ? line.x_price_per_si : null,
+      workType: line.x_work_type || null,
+      orderTotal: typeof order.amount_total === "number" ? order.amount_total : null,
+      currency: order.currency_id?.[1] ?? null,
+    };
+  });
 }
 
 async function resolveTestCompanyId(uid, companyName = null) {
@@ -326,7 +426,7 @@ async function findLivePartner(uid, customer, companyId) {
   return partners.find((p) => !p.company_id || p.company_id[0] === companyId) ?? null;
 }
 
-function buildPartResult(part, matchedCustomer, previousQuote) {
+function buildPartResult(part, matchedCustomer, previousQuote, priceHistory = []) {
   const reason = !matchedCustomer
     ? "NEW_CUSTOMER"
     : previousQuote
@@ -344,6 +444,7 @@ function buildPartResult(part, matchedCustomer, previousQuote) {
     sourceFile: part.sourceDrawingFile ?? null,
     reason,
     previousQuote,
+    priceHistory,
     computedPrice,
   };
 }

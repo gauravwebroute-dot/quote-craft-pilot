@@ -29,11 +29,13 @@ import {
   Clock,
   ShieldCheck,
   Lock,
+  History,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
 import { saveLocalQuote, getLocalSequence } from "@/lib/localQuoteStore";
+import { PriceHistoryDialog, type PriceHistoryEntry } from "./PriceHistoryDialog";
 
 type PartCrossCheck = {
   partNumber: string | null;
@@ -41,6 +43,7 @@ type PartCrossCheck = {
   sourceFile: string | null;
   reason: "NEW_CUSTOMER" | "EXISTING_QUOTE_FOUND" | "NO_PRIOR_QUOTE_FOR_THIS_PART";
   previousQuote: { pricePerUnit?: number; revision?: string | null; quotedAt?: string; saleOrderName?: string } | null;
+  priceHistory?: PriceHistoryEntry[];
   computedPrice: {
     pricePerUnit?: number;
     totalLineItem?: number;
@@ -122,6 +125,7 @@ export function SectionOdoo({
   const [isChecking, setIsChecking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPriceHistory, setShowPriceHistory] = useState(false);
 
   // Reconciliation / Conflict resolution state (REQ-008, Section 6.2)
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
@@ -149,6 +153,10 @@ export function SectionOdoo({
       if (!response.ok) throw new Error(payload.message || "Odoo cross-check failed.");
       setCrossCheck(payload);
       setConflicts(payload.conflicts || []);
+      // Existing customer + same part quoted before: show the earlier prices right away.
+      if (payload.customer?.matched && payload.parts?.some((p) => (p.priceHistory?.length ?? 0) > 0)) {
+        setShowPriceHistory(true);
+      }
     } catch (requestError) {
       setError(
         requestError instanceof TypeError
@@ -414,6 +422,16 @@ export function SectionOdoo({
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+          )}
+
+          {crossCheck?.parts?.some((p) => (p.priceHistory?.length ?? 0) > 0) && (
+            <Button
+              variant="outline"
+              onClick={() => setShowPriceHistory(true)}
+              className="gap-2 border-[#374151]"
+            >
+              <History className="size-4" /> Price history
+            </Button>
           )}
 
           {extraction?.parts && extraction.parts.length > 0 && (
@@ -684,6 +702,19 @@ export function SectionOdoo({
           </CardContent>
         </Card>
       ) : null}
+
+      <PriceHistoryDialog
+        open={showPriceHistory}
+        onOpenChange={setShowPriceHistory}
+        customerName={
+          crossCheck?.customer?.record?.name ||
+          extraction?.customer?.["company"] ||
+          extraction?.customer?.["contact"] ||
+          "This customer"
+        }
+        businessUnit={businessUnit}
+        parts={crossCheck?.parts ?? []}
+      />
 
       <div className="flex">
         <Button variant="outline" onClick={onBack} className="border-[#374151] text-xs">
