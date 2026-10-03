@@ -1,17 +1,20 @@
 import { Router } from "express";
-import { crossCheckOdoo } from "../services/odooCrossCheck.js";
+import { crossCheckOdoo, BusinessUnitError } from "../services/odooCrossCheck.js";
 import { createOdooQuotation, SafetyError } from "../services/odooCreateQuotation.js";
 
 const router = Router();
 
 router.post("/odoo/cross-check", async (req, res) => {
   try {
-    const { customer, parts } = req.body ?? {};
+    const { customer, parts, businessUnit } = req.body ?? {};
     if (!customer || !Array.isArray(parts)) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Provide customer and parts for the Odoo cross-check." });
     }
-    return res.json(await crossCheckOdoo({ customer, parts }));
+    return res.json(await crossCheckOdoo({ customer, parts, businessUnit }));
   } catch (error) {
+    if (error instanceof BusinessUnitError) {
+      return res.status(400).json({ error: "BUSINESS_UNIT_NOT_ALLOWED", message: error.message });
+    }
     console.error("[POST /api/odoo/cross-check] failed:", error);
     return res.status(502).json({ error: "ODOO_CHECK_FAILED", message: error instanceof Error ? error.message : "Odoo cross-check failed." });
   }
@@ -23,13 +26,16 @@ router.post("/odoo/cross-check", async (req, res) => {
 // for the full safety contract this endpoint follows.
 router.post("/odoo/create-quotation", async (req, res) => {
   try {
-    const { customer, parts, confirm } = req.body ?? {};
+    const { customer, parts, confirm, businessUnit } = req.body ?? {};
     if (!customer || !Array.isArray(parts)) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Provide customer and parts to create a quotation." });
     }
-    const result = await createOdooQuotation({ customer, parts, confirm });
+    const result = await createOdooQuotation({ customer, parts, confirm, businessUnit });
     return res.json(result);
   } catch (error) {
+    if (error instanceof BusinessUnitError) {
+      return res.status(400).json({ error: "BUSINESS_UNIT_NOT_ALLOWED", message: error.message });
+    }
     if (error instanceof SafetyError) {
       return res.status(400).json({ error: "SAFETY_CHECK_FAILED", message: error.message });
     }

@@ -19,6 +19,37 @@ import { DEFAULT_RATE_CARD } from "../config/rateCard.js";
 export const TEST_COMPANY_NAME = "OC Custom Coating";
 export const TEST_TAG_NAME = "+temp test";
 
+export class BusinessUnitError extends Error {}
+
+/**
+ * Companies (business units) the app is allowed to read from / write to in
+ * Odoo. Defaults to TEST_COMPANY_NAME only. To enable more, set the env var
+ * ODOO_ALLOWED_BUSINESS_UNITS to a comma-separated list, for example
+ * "OC Custom Coating,MAD Custom-Coating". The caller (frontend) chooses WHICH
+ * of these to use, but can never name a company outside this allowlist.
+ */
+export function allowedBusinessUnits() {
+  const list = String(process.env.ODOO_ALLOWED_BUSINESS_UNITS || "")
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : [TEST_COMPANY_NAME];
+}
+
+export function resolveBusinessUnit(input) {
+  const requested = String(input ?? "").trim();
+  if (!requested) return TEST_COMPANY_NAME;
+  const match = allowedBusinessUnits().find((n) => n.toLowerCase() === requested.toLowerCase());
+  if (!match) {
+    throw new BusinessUnitError(
+      `Business unit "${requested}" is not enabled for Odoo operations. ` +
+        `Allowed: ${allowedBusinessUnits().join(", ")}. ` +
+        `Set ODOO_ALLOWED_BUSINESS_UNITS on the server to enable more companies.`,
+    );
+  }
+  return match;
+}
+
 const DUMMY_CUSTOMERS = [
   {
     id: 101,
@@ -46,9 +77,10 @@ const DUMMY_QUOTES = [
 const isLiveConfigured = () =>
   Boolean(process.env.ODOO_URL && process.env.ODOO_DB && process.env.ODOO_USERNAME && process.env.ODOO_API_KEY);
 
-export async function crossCheckOdoo({ customer = {}, parts = [] }) {
+export async function crossCheckOdoo({ customer = {}, parts = [], businessUnit = null }) {
+  const unit = resolveBusinessUnit(businessUnit);
   if (isLiveConfigured()) {
-    return crossCheckLiveOdoo({ customer, parts });
+    return crossCheckLiveOdoo({ customer, parts, businessUnit: unit });
   }
   return crossCheckDummyOdoo({ customer, parts });
 }
@@ -135,9 +167,9 @@ function findDummyCustomer(customer) {
   );
 }
 
-async function crossCheckLiveOdoo({ customer, parts }) {
+async function crossCheckLiveOdoo({ customer, parts, businessUnit = TEST_COMPANY_NAME }) {
   const uid = await odooAuth();
-  const companyId = await resolveTestCompanyId(uid);
+  const companyId = await resolveTestCompanyId(uid, businessUnit);
 
   const partner = await findLivePartner(uid, customer, companyId);
   const conflicts = [];
@@ -213,15 +245,15 @@ async function crossCheckLiveOdoo({ customer, parts }) {
 
   return {
     mode: "live",
-    company: { id: companyId, name: TEST_COMPANY_NAME },
+    company: { id: companyId, name: businessUnit },
     customer: { matched: Boolean(partner), record: partner, candidates: partner ? [partner] : [] },
     parts: results,
     subChecks,
     conflicts,
     hasConflicts: conflicts.length > 0,
     message: partner
-      ? `Live customer + prior-quote lookup completed, scoped to "${TEST_COMPANY_NAME}" only.`
-      : `No matching customer found under "${TEST_COMPANY_NAME}" in Odoo - this would be a new customer.`,
+      ? `Live customer + prior-quote lookup completed, scoped to "${businessUnit}" only.`
+      : `No matching customer found under "${businessUnit}" in Odoo - this would be a new customer.`,
   };
 }
 

@@ -223,7 +223,7 @@ export function SectionInput({
           const res = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pdfHash: hash, sourceFile: newFiles[0]?.name }),
+            body: JSON.stringify({ pdfHash: hash, sourceFile: newFiles[0]?.name, businessUnit: selectedBU }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -281,6 +281,7 @@ export function SectionInput({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             pdfHash,
+            businessUnit: selectedBU,
             sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
             customer: payload.extraction.customer,
             parts: payload.extraction.parts,

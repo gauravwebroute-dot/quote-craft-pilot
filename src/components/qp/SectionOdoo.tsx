@@ -33,7 +33,7 @@ import {
 import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
-import { saveLocalQuote, advanceLocalSequence } from "@/lib/localQuoteStore";
+import { saveLocalQuote, getLocalSequence } from "@/lib/localQuoteStore";
 
 type PartCrossCheck = {
   partNumber: string | null;
@@ -143,7 +143,7 @@ export function SectionOdoo({
       const response = await fetch(`${apiUrl()}/api/odoo/cross-check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer: extraction.customer, parts: extraction.parts }),
+        body: JSON.stringify({ customer: extraction.customer, parts: extraction.parts, businessUnit }),
       });
       const payload: CrossCheckResult = await response.json();
       if (!response.ok) throw new Error(payload.message || "Odoo cross-check failed.");
@@ -202,7 +202,6 @@ export function SectionOdoo({
         businessUnit,
         formPayload: extraction,
       });
-      advanceLocalSequence();
     }
 
     // 2. Record terminal export action (Mode B) with full payload preservation
@@ -212,6 +211,7 @@ export function SectionOdoo({
       body: JSON.stringify({
         draftSequenceId: quoteNumber,
         action: "EXCEL_EXPORT",
+        businessUnit,
         customer: extraction.customer,
         parts: extraction.parts,
         formPayload: extraction,
@@ -230,6 +230,7 @@ export function SectionOdoo({
         body: JSON.stringify({
           customer: extraction.customer,
           parts: extraction.parts,
+          businessUnit,
           formPayload: { ...extraction, draftSequenceId: quoteNumber },
           confirm: true,
         }),
@@ -237,11 +238,14 @@ export function SectionOdoo({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to create Odoo quotation.");
 
-      const createdOrderName = payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
+      const createdOrderName = payload.created?.saleOrderName;
+      if (!createdOrderName) {
+        throw new Error(payload.message || "Odoo did not return a quotation number. Nothing was marked as synced.");
+      }
       setSyncedOrder(createdOrderName);
 
       // 1. Save to local browser storage immediately
-      let nextSeq = advanceLocalSequence();
+      let nextSeq = getLocalSequence();
       if (quoteNumber) {
         saveLocalQuote({
           draftSequenceId: quoteNumber,
@@ -251,6 +255,8 @@ export function SectionOdoo({
           businessUnit,
           formPayload: extraction,
         });
+        // saveLocalQuote advances the local counter once for a SYNCED quote
+        nextSeq = getLocalSequence();
       }
 
       // 2. Record Mode A terminal action: locked in DB & transitioned ID with full payload
@@ -261,6 +267,7 @@ export function SectionOdoo({
           body: JSON.stringify({
             draftSequenceId: quoteNumber,
             action: "ODOO_SYNC",
+            businessUnit,
             odooSequenceId: createdOrderName,
             customer: extraction.customer,
             parts: extraction.parts,
@@ -296,6 +303,7 @@ export function SectionOdoo({
         body: JSON.stringify({
           customer: extraction.customer,
           parts: original ? [original] : [],
+          businessUnit,
           formPayload: extraction,
           confirm: true,
         }),
