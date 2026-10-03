@@ -467,7 +467,7 @@ export function SectionOdoo({
             {getIndicatorBadge(partStatus, "Pending")}
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {crossCheck?.subChecks?.partMasterSync?.message || "Cross-references parts against Odoo catalog."}
+            {crossCheck?.subChecks?.partMasterSync?.message || "Compares part revisions against earlier quotes for this customer."}
           </p>
         </div>
 
@@ -477,7 +477,7 @@ export function SectionOdoo({
             {getIndicatorBadge(exportStatus, "Pending")}
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {crossCheck?.subChecks?.exportQuotationCheck?.message || "Validates subtotal arithmetic & tax terms."}
+            {crossCheck?.subChecks?.exportQuotationCheck?.message || "Checks every part is priced and line totals add up."}
           </p>
         </div>
       </div>

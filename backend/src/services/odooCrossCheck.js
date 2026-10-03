@@ -150,20 +150,8 @@ function crossCheckDummyOdoo({ customer, parts }) {
         : "No existing partner record found in Odoo. New partner will be created upon confirmation.",
       matched: Boolean(matchedCustomer),
     },
-    partMasterSync: {
-      status: conflicts.length > 0 ? "CONFLICT" : results.length > 0 ? "COMPLETE" : "NOT_STARTED",
-      label: "Part Master Sync",
-      message: conflicts.length > 0
-        ? `${conflicts.length} conflict(s) detected with stored Odoo master records.`
-        : `${results.length} part(s) cross-referenced against Odoo catalog.`,
-      conflictsCount: conflicts.length,
-    },
-    exportQuotationCheck: {
-      status: results.length > 0 ? "COMPLETE" : "NOT_STARTED",
-      label: "Export Quotation Check",
-      message: "Subtotal arithmetic verified, standard tax rules applied (Tax Excl.), 5-7 day lead time.",
-      validArithmetic: true,
-    },
+    partMasterSync: buildPartMasterSyncCheck(results, conflicts),
+    exportQuotationCheck: buildExportQuotationCheck(results, parts),
   };
 
   return {
@@ -233,20 +221,8 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = TEST_COMPANY
         : "No matching customer found in Odoo under test company.",
       matched: Boolean(partner),
     },
-    partMasterSync: {
-      status: conflicts.length > 0 ? "CONFLICT" : results.length > 0 ? "COMPLETE" : "NOT_STARTED",
-      label: "Part Master Sync",
-      message: conflicts.length > 0
-        ? `${conflicts.length} conflict(s) detected with live Odoo records.`
-        : "All part references synced with Odoo catalog.",
-      conflictsCount: conflicts.length,
-    },
-    exportQuotationCheck: {
-      status: results.length > 0 ? "COMPLETE" : "NOT_STARTED",
-      label: "Export Quotation Check",
-      message: "Subtotal arithmetic verified, tax status confirmed, lead times validated.",
-      validArithmetic: true,
-    },
+    partMasterSync: buildPartMasterSyncCheck(results, conflicts),
+    exportQuotationCheck: buildExportQuotationCheck(results, parts),
   };
 
   return {
@@ -424,6 +400,77 @@ async function findLivePartner(uid, customer, companyId) {
   ]);
 
   return partners.find((p) => !p.company_id || p.company_id[0] === companyId) ?? null;
+}
+
+/**
+ * Part Master Sync - what this REALLY checks: for each extracted part, was the
+ * same part number quoted to this customer before, and does that earlier quote
+ * differ from this RFQ (drawing revision, and in sample mode price). It does not look at
+ * Odoo's product catalog, so the message says exactly that and nothing more.
+ */
+function buildPartMasterSyncCheck(results, conflicts) {
+  const total = results.length;
+  const withHistory = results.filter((r) => r.reason === "EXISTING_QUOTE_FOUND").length;
+  const base = { label: "Part Master Sync", conflictsCount: conflicts.length };
+  if (total === 0) {
+    return { ...base, status: "NOT_STARTED", message: "No parts to check yet." };
+  }
+  if (conflicts.length > 0) {
+    return {
+      ...base,
+      status: "CONFLICT",
+      message: `${conflicts.length} difference(s) found vs the last quote - choose which value to keep below.`,
+    };
+  }
+  return {
+    ...base,
+    status: "COMPLETE",
+    message:
+      withHistory > 0
+        ? `${withHistory} of ${total} part(s) were quoted before; no differences from the last quote.`
+        : `${total} part(s) checked - none were quoted to this customer before.`,
+  };
+}
+
+/**
+ * Export Quotation Check - what this REALLY checks: every part could be priced
+ * from the rate card, and each line total equals unit price x quantity. Tax and
+ * lead time are not computed anywhere in this app, so they are not claimed.
+ */
+function buildExportQuotationCheck(results, parts) {
+  const base = { label: "Export Quotation Check" };
+  if (results.length === 0) {
+    return { ...base, status: "NOT_STARTED", validArithmetic: false, message: "No parts to check yet." };
+  }
+  const unpriced = results.filter((r) => r.computedPrice?.priced === false);
+  const mismatched = results.filter((r, i) => {
+    const c = r.computedPrice;
+    if (!c || c.priced === false || typeof c.pricePerUnit !== "number" || typeof c.totalLineItem !== "number") return false;
+    const qty = Number(parts[i]?.quantity ?? 1) || 1;
+    return Math.abs(c.pricePerUnit * qty - c.totalLineItem) > 0.02;
+  });
+  if (unpriced.length > 0) {
+    return {
+      ...base,
+      status: "NEEDS_ATTENTION",
+      validArithmetic: false,
+      message: `${unpriced.length} of ${results.length} part(s) could not be priced (missing area or quantity). Add the missing values before exporting.`,
+    };
+  }
+  if (mismatched.length > 0) {
+    return {
+      ...base,
+      status: "CONFLICT",
+      validArithmetic: false,
+      message: `${mismatched.length} line total(s) do not equal unit price x quantity.`,
+    };
+  }
+  return {
+    ...base,
+    status: "COMPLETE",
+    validArithmetic: true,
+    message: `All ${results.length} part(s) priced; each line total equals unit price x quantity.`,
+  };
 }
 
 function buildPartResult(part, matchedCustomer, previousQuote, priceHistory = []) {
