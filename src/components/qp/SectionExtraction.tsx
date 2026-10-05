@@ -146,7 +146,7 @@ function PricingGroupCard({
   rows,
 }: {
   title: string;
-  costBadge?: string;
+  costBadge?: string | undefined;
   rows: Array<{
     label: string;
     value: string;
@@ -165,7 +165,10 @@ function PricingGroupCard({
       </div>
       <div className="divide-y divide-border/40">
         {rows.map((r, i) => (
-          <div key={i} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
+          <div
+            key={i}
+            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2"
+          >
             <span className="text-sm font-semibold text-foreground">{r.label}:</span>
             <span className="text-right tabular-nums text-sm">
               <span className="font-medium">{r.value}</span>
@@ -185,11 +188,11 @@ function PricingGroupCard({
 interface PartDetailCardProps {
   part: ExtractionPart;
   index: number;
-  pricing?: PricingPartBreakdown;
-  extractionNotes?: string[];
-  uploadedFiles?: File[];
+  pricing?: PricingPartBreakdown | undefined;
+  extractionNotes?: string[] | undefined;
+  uploadedFiles?: File[] | undefined;
   onOpenDrawing?: (drawingName?: string | null) => void;
-  onBackToSummary?: () => void;
+  onBackToSummary?: (() => void) | undefined;
 }
 
 function PartDetailCard({
@@ -226,8 +229,18 @@ function PartDetailCard({
 
   // Coating BOM items strictly from extracted data
   const coatingBomEntries: Array<{ label: string; value: string; warn?: boolean }> = [
-    { label: "Masking", value: part.coatingBom?.masking || "None", warn: !part.coatingBom?.masking || part.coatingBom.masking.toLowerCase() === "none" },
-    { label: "Media Blasting", value: part.coatingBom?.mediaBlasting || "Not listed", warn: !part.coatingBom?.mediaBlasting || part.coatingBom.mediaBlasting.toLowerCase() === "not listed" },
+    {
+      label: "Masking",
+      value: part.coatingBom?.masking || "None",
+      warn: !part.coatingBom?.masking || part.coatingBom.masking.toLowerCase() === "none",
+    },
+    {
+      label: "Media Blasting",
+      value: part.coatingBom?.mediaBlasting || "Not listed",
+      warn:
+        !part.coatingBom?.mediaBlasting ||
+        part.coatingBom.mediaBlasting.toLowerCase() === "not listed",
+    },
     { label: "Primer", value: part.coatingBom?.primer || "NOT_SPECIFIED" },
     { label: "Prep", value: part.coatingBom?.prep || part.prepType || "NOT_SPECIFIED" },
     { label: "Topcoat", value: part.coatingBom?.topcoat || "NOT_SPECIFIED" },
@@ -242,7 +255,12 @@ function PartDetailCard({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 p-4 sm:p-5 bg-muted/20">
         <div className="flex flex-wrap items-center gap-2.5">
           {onBackToSummary && (
-            <Button variant="outline" size="sm" onClick={onBackToSummary} className="h-8 gap-1 text-xs">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onBackToSummary}
+              className="h-8 gap-1 text-xs"
+            >
               <ArrowLeft className="size-3.5" /> Back to Summary
             </Button>
           )}
@@ -366,11 +384,19 @@ function PartDetailCard({
                 />
                 <Field label="Material" value={part.material || "NOT_SPECIFIED"} />
                 <Field label="Part Mark" value={part.partMark ? "Yes" : "No"} />
-                {part.partMarkSpec ? <Field label="Part Mark Spec" value={part.partMarkSpec} /> : null}
+                {part.partMarkSpec ? (
+                  <Field label="Part Mark Spec" value={part.partMarkSpec} />
+                ) : null}
                 <Field label="Prep Type" value={part.prepType || "NOT_SPECIFIED"} />
                 <Field
                   label="Scale Present?"
-                  value={part.hasScale === true ? "Yes" : part.hasScale === false ? "No" : "NOT_SPECIFIED"}
+                  value={
+                    part.hasScale === true
+                      ? "Yes"
+                      : part.hasScale === false
+                        ? "No"
+                        : "NOT_SPECIFIED"
+                  }
                   warn={part.hasScale == null}
                 />
                 <Field
@@ -384,20 +410,10 @@ function PartDetailCard({
                   }
                 />
                 {part.estimationMethod && (
-                  <Field
-                    label="Estimation Method"
-                    editable={false}
-                    value={part.estimationMethod}
-                  />
+                  <Field label="Estimation Method" editable={false} value={part.estimationMethod} />
                 )}
-                <Field
-                  label="Coating Area (Sq In)"
-                  value={`${coatingSqIn} sq in`}
-                />
-                <Field
-                  label="Masking Area (Sq In)"
-                  value={`${maskingSqIn} sq in`}
-                />
+                <Field label="Coating Area (Sq In)" value={`${coatingSqIn} sq in`} />
+                <Field label="Masking Area (Sq In)" value={`${maskingSqIn} sq in`} />
                 {part.dimensions?.shapeType ? (
                   <Field
                     label="Dimensions / Shape"
@@ -412,7 +428,8 @@ function PartDetailCard({
             {part.bomItems && part.bomItems.length > 0 && (
               <SubSection title="Bill of Materials (BOM) — Preserved Separately" tone="plain">
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Preserved separately for reference and component scope analysis — not merged into primary quote target.
+                  Preserved separately for reference and component scope analysis — not merged into
+                  primary quote target.
                 </p>
                 <div className="overflow-x-auto rounded border border-border">
                   <table className="w-full text-left text-xs">
@@ -430,7 +447,9 @@ function PartDetailCard({
                         <tr key={idx} className="hover:bg-muted/20">
                           <td className="p-2 font-mono">{item.itemNumber || idx + 1}</td>
                           <td className="p-2 font-medium">{item.partNumber || "NOT_SPECIFIED"}</td>
-                          <td className="p-2 text-muted-foreground">{item.description || "NOT_SPECIFIED"}</td>
+                          <td className="p-2 text-muted-foreground">
+                            {item.description || "NOT_SPECIFIED"}
+                          </td>
                           <td className="p-2 text-right tabular-nums">{item.quantity ?? 1}</td>
                           <td className="p-2">{item.material || "NOT_SPECIFIED"}</td>
                         </tr>
@@ -481,7 +500,10 @@ function PartDetailCard({
                     costBadge={masking ? formatMoney(masking.cost) : undefined}
                     rows={[
                       { label: "Total Area", value: `${masking?.totalArea ?? totalArea} SI` },
-                      { label: "Masked Area", value: `${masking?.maskedArea ?? part.maskingAreaSqIn ?? 0} SI` },
+                      {
+                        label: "Masked Area",
+                        value: `${masking?.maskedArea ?? part.maskingAreaSqIn ?? 0} SI`,
+                      },
                       {
                         label: "Holes",
                         value: `${masking?.holes ?? 0}`,
@@ -502,7 +524,8 @@ function PartDetailCard({
                       { label: "Total Area", value: `${mediaBlasting?.totalArea ?? totalArea} SI` },
                       {
                         label: "Time",
-                        value: mediaBlasting?.timeText || `${(totalArea * 0.03).toFixed(2)} min/unit`,
+                        value:
+                          mediaBlasting?.timeText || `${(totalArea * 0.03).toFixed(2)} min/unit`,
                         parenthetical: mediaBlasting?.timeRateText || "0.03 min/SI",
                       },
                     ]}
@@ -533,7 +556,10 @@ function PartDetailCard({
                       },
                       {
                         label: "Color Complexity",
-                        value: coating?.colorComplexity || part.coatingBom?.color || "TBD – Cerakote Camo Green FED-STD-595",
+                        value:
+                          coating?.colorComplexity ||
+                          part.coatingBom?.color ||
+                          "TBD – Cerakote Camo Green FED-STD-595",
                       },
                       {
                         label: "Oven Time",
@@ -547,7 +573,9 @@ function PartDetailCard({
                     rows={[
                       {
                         label: "Chem Film",
-                        value: adjustments?.chemFilm?.text || "YES – 1 Lot of $200 to add to invoice ($200 min lot fee, $0.03/SI)",
+                        value:
+                          adjustments?.chemFilm?.text ||
+                          "YES – 1 Lot of $200 to add to invoice ($200 min lot fee, $0.03/SI)",
                       },
                       {
                         label: "Rush order",
@@ -571,7 +599,9 @@ function PartDetailCard({
                       },
                       {
                         label: "Price per Unit",
-                        value: summary?.pricePerUnitMinText || `$${unitPrice.toFixed(2)} ($5.00/unit min)`,
+                        value:
+                          summary?.pricePerUnitMinText ||
+                          `$${unitPrice.toFixed(2)} ($5.00/unit min)`,
                       },
                     ]}
                   />
@@ -587,26 +617,40 @@ function PartDetailCard({
                   <div className="grid gap-2 sm:grid-cols-2 divide-y sm:divide-y-0 divide-border/40 text-sm">
                     <div className="space-y-1.5">
                       <div className="flex justify-between py-1 border-b border-border/30">
-                        <span className="font-semibold text-foreground">Cerakote without masking:</span>
-                        <span className="font-medium tabular-nums">{summary?.cerakoteWithoutMasking || "$0.40/SI"}</span>
+                        <span className="font-semibold text-foreground">
+                          Cerakote without masking:
+                        </span>
+                        <span className="font-medium tabular-nums">
+                          {summary?.cerakoteWithoutMasking || "$0.40/SI"}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
-                        <span className="font-semibold text-foreground">Cerakote with masking:</span>
-                        <span className="font-medium tabular-nums">{summary?.cerakoteWithMasking || "$0.46/SI"}</span>
+                        <span className="font-semibold text-foreground">
+                          Cerakote with masking:
+                        </span>
+                        <span className="font-medium tabular-nums">
+                          {summary?.cerakoteWithMasking || "$0.46/SI"}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1">
                         <span className="font-semibold text-foreground">Media Blasting:</span>
-                        <span className="font-medium tabular-nums">{summary?.mediaBlasting || "Included ($0.00/SI)"}</span>
+                        <span className="font-medium tabular-nums">
+                          {summary?.mediaBlasting || "Included ($0.00/SI)"}
+                        </span>
                       </div>
                     </div>
                     <div className="space-y-1.5">
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">Chem Film:</span>
-                        <span className="font-medium tabular-nums">{summary?.chemFilm || "$0.03/SI (with $200 min lot fee)"}</span>
+                        <span className="font-medium tabular-nums">
+                          {summary?.chemFilm || "$0.03/SI (with $200 min lot fee)"}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">Minimum price/unit:</span>
-                        <span className="font-medium tabular-nums">{summary?.minimumPricePerUnit || "$5.00"}</span>
+                        <span className="font-medium tabular-nums">
+                          {summary?.minimumPricePerUnit || "$5.00"}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -623,13 +667,19 @@ function PartDetailCard({
                       <span className="text-xs opacity-80">($5.00 minimum price per unit)</span>
                     </div>
                     <div className="text-right">
-                      <span className="text-sm opacity-90 font-medium">Quantity: {quantity} pcs</span>
+                      <span className="text-sm opacity-90 font-medium">
+                        Quantity: {quantity} pcs
+                      </span>
                     </div>
                   </div>
                   <Separator className="my-3 bg-primary-foreground/25" />
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-base font-semibold">Total Line Item ({quantity} Qty):</span>
-                    <span className="text-2xl font-black tabular-nums">{formatMoney(lineTotal)}</span>
+                    <span className="text-base font-semibold">
+                      Total Line Item ({quantity} Qty):
+                    </span>
+                    <span className="text-2xl font-black tabular-nums">
+                      {formatMoney(lineTotal)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -644,7 +694,9 @@ function PartDetailCard({
                   <li className="flex items-start gap-2.5 font-medium text-amber-500">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <span>
-                      <strong>Provisional Part Identification:</strong> Part number or title block was not definitively resolved from drawing text. Flagged as provisional for human review.
+                      <strong>Provisional Part Identification:</strong> Part number or title block
+                      was not definitively resolved from drawing text. Flagged as provisional for
+                      human review.
                     </span>
                   </li>
                 ) : null}
@@ -784,14 +836,21 @@ export function SectionExtraction({
       );
       if (match) targetFile = match;
     }
+    if (!targetFile) return;
     const url = URL.createObjectURL(targetFile);
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const handleExportCsv = () => {
     if (!extraction?.parts?.length) return;
-    const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
-    downloadOdooCsv(extraction.parts, customer, pricing, `${quoteNumber || "quotation"}_odoo_import.csv`);
+    const customer =
+      extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
+    downloadOdooCsv(
+      extraction.parts,
+      customer,
+      pricing,
+      `${quoteNumber || "quotation"}_odoo_import.csv`,
+    );
   };
 
   // Determine active part if focused on a specific part ID
@@ -805,8 +864,10 @@ export function SectionExtraction({
 
   const parts = extraction?.parts ?? [];
   const hasExtractedParts = parts.length > 0;
-  const selectedPart = selectedPartIndex >= 0 && selectedPartIndex < parts.length ? parts[selectedPartIndex] : null;
-  const selectedPartPricing = selectedPartIndex >= 0 ? pricing?.results[selectedPartIndex] : undefined;
+  const selectedPart =
+    selectedPartIndex >= 0 && selectedPartIndex < parts.length ? parts[selectedPartIndex] : null;
+  const selectedPartPricing =
+    selectedPartIndex >= 0 ? pricing?.results[selectedPartIndex] : undefined;
 
   const handleRunExtraction = () => {
     onBack();
@@ -858,7 +919,8 @@ export function SectionExtraction({
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Extraction Results</h1>
           <p className="mt-1 text-base text-muted-foreground">
-            Review customer information, part summary, and pricing breakdown before Odoo cross-check.
+            Review customer information, part summary, and pricing breakdown before Odoo
+            cross-check.
           </p>
           {extraction ? (
             <p className="mt-1 text-xs font-medium text-muted-foreground">
@@ -878,7 +940,8 @@ export function SectionExtraction({
               onClick={() => handleOpenDrawing()}
               className="h-8 gap-1.5 text-xs font-semibold"
             >
-              <Eye className="size-3.5" /> View Original Drawing{uploadedFiles.length > 1 ? "s" : ""}
+              <Eye className="size-3.5" /> View Original Drawing
+              {uploadedFiles.length > 1 ? "s" : ""}
             </Button>
           )}
 
@@ -986,12 +1049,24 @@ export function SectionExtraction({
                 <CardContent className="pt-0 divide-y divide-border/30">
                   {extraction?.customer ? (
                     <>
-                      <Field label="Company" value={extraction.customer.company || "Not provided"} />
-                      <Field label="Contact" value={extraction.customer.contact || "Not provided"} />
+                      <Field
+                        label="Company"
+                        value={extraction.customer.company || "Not provided"}
+                      />
+                      <Field
+                        label="Contact"
+                        value={extraction.customer.contact || "Not provided"}
+                      />
                       <Field label="Email" value={extraction.customer.email || "Not provided"} />
                       <Field label="Phone" value={extraction.customer.phone || "Not provided"} />
-                      <Field label="Address" value={extraction.customer.address || "Not provided"} />
-                      <Field label="Email / Req Date" value={extraction.customer.requestDate || "Not provided"} />
+                      <Field
+                        label="Address"
+                        value={extraction.customer.address || "Not provided"}
+                      />
+                      <Field
+                        label="Email / Req Date"
+                        value={extraction.customer.requestDate || "Not provided"}
+                      />
                       <Field
                         label="Request DD (Due Date)"
                         value={extraction.customer.requestDueDate || "Not specified"}
@@ -1003,7 +1078,9 @@ export function SectionExtraction({
                       />
                     </>
                   ) : (
-                    <p className="py-4 text-sm text-muted-foreground">No customer information available.</p>
+                    <p className="py-4 text-sm text-muted-foreground">
+                      No customer information available.
+                    </p>
                   )}
                 </CardContent>
               ) : null}
@@ -1012,7 +1089,10 @@ export function SectionExtraction({
 
           {/* VIEW MODE 3: PART SUMMARY TABLE (Shown in 'overview' or 'summary' view) */}
           {(focusedSection === "overview" || focusedSection === "summary" || !focusedSection) && (
-            <Card id="section-summary" className="scroll-mt-28 overflow-hidden border-primary/30 shadow-2xs">
+            <Card
+              id="section-summary"
+              className="scroll-mt-28 overflow-hidden border-primary/30 shadow-2xs"
+            >
               <div className="flex items-center justify-between bg-[#1e3a5f] px-4 py-3 text-white sm:px-6">
                 <div className="flex items-center gap-2">
                   <TableProperties className="size-4" />
@@ -1029,7 +1109,10 @@ export function SectionExtraction({
                   >
                     <FileSpreadsheet className="size-3.5" /> Export Odoo CSV
                   </Button>
-                  <Badge variant="outline" className="border-white/30 bg-white/10 text-xs text-white">
+                  <Badge
+                    variant="outline"
+                    className="border-white/30 bg-white/10 text-xs text-white"
+                  >
                     {summaryRows.length} Line Item{summaryRows.length === 1 ? "" : "s"} extracted
                   </Badge>
                 </div>
@@ -1057,10 +1140,16 @@ export function SectionExtraction({
                         <th className="border-r border-slate-300 px-2 py-3">Part Number</th>
                         <th className="border-r border-slate-300 px-2 py-3">Name / Description</th>
                         <th className="border-r border-slate-300 px-1.5 py-3 text-center">Rev</th>
-                        <th className="border-r border-slate-300 px-2 py-3 text-right">Sq. In. / Unit</th>
+                        <th className="border-r border-slate-300 px-2 py-3 text-right">
+                          Sq. In. / Unit
+                        </th>
                         <th className="border-r border-slate-300 px-2 py-3">Work Type</th>
-                        <th className="border-r border-slate-300 px-2 py-3 text-right">Price / SI</th>
-                        <th className="border-r border-slate-300 px-2 py-3 text-right">Price / Unit</th>
+                        <th className="border-r border-slate-300 px-2 py-3 text-right">
+                          Price / SI
+                        </th>
+                        <th className="border-r border-slate-300 px-2 py-3 text-right">
+                          Price / Unit
+                        </th>
                         <th className="border-r border-slate-300 px-1.5 py-3 text-right">Qty</th>
                         <th className="px-2 py-3 text-right">Total</th>
                       </tr>
@@ -1084,7 +1173,9 @@ export function SectionExtraction({
                               </span>
                             </td>
                             <td className="border-r border-slate-200 px-2 py-3.5">
-                              <div className="font-semibold text-foreground truncate">{row.name}</div>
+                              <div className="font-semibold text-foreground truncate">
+                                {row.name}
+                              </div>
                               {row.summary ? (
                                 <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                                   {row.summary}
@@ -1118,7 +1209,10 @@ export function SectionExtraction({
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={10} className="py-8 text-center text-muted-foreground text-sm">
+                          <td
+                            colSpan={10}
+                            className="py-8 text-center text-muted-foreground text-sm"
+                          >
                             No parts extracted yet. Upload drawings or email text to run extraction.
                           </td>
                         </tr>
@@ -1133,7 +1227,11 @@ export function SectionExtraction({
                           {parts.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0)} pcs
                         </td>
                         <td className="px-2 py-3.5 text-right text-base font-black tabular-nums text-primary">
-                          {pricing ? formatMoney(pricing.quoteTotal) : pricingError ? "Unavailable" : "Pending"}
+                          {pricing
+                            ? formatMoney(pricing.quoteTotal)
+                            : pricingError
+                              ? "Unavailable"
+                              : "Pending"}
                         </td>
                       </tr>
                     </tfoot>

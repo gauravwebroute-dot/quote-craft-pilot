@@ -16,8 +16,7 @@ import type { ExtractionResult } from "./SectionInput";
 
 export type NavigationTarget = {
   step: number;
-  section?:
-    "overview" | "customer" | "summary" | `part-${number}`;
+  section?: "overview" | "customer" | "summary" | `part-${number}`;
 };
 
 interface TreeMenuProps {
@@ -43,10 +42,11 @@ export function TreeMenu({
   const [partDetailsExpanded, setPartDetailsExpanded] = useState(true);
   const [odooExpanded, setOdooExpanded] = useState(true);
 
-  const partList = extraction?.parts.map((part, index) => ({
-    id: `part-${index + 1}` as `part-${number}`,
-    label: part.partNumber || part.partName || `Part ${index + 1}`,
-  })) ?? [];
+  const partList =
+    extraction?.parts.map((part, index) => ({
+      id: `part-${index + 1}` as `part-${number}`,
+      label: part.partNumber || part.partName || `Part ${index + 1}`,
+    })) ?? [];
   const isPartSectionActive = currentStep === 1 && currentSection.startsWith("part-");
 
   return (
@@ -120,7 +120,7 @@ export function TreeMenu({
             >
               <Layers className="size-4 shrink-0" />
               <span className="flex-1 truncate">2. Extraction Results</span>
-                <span className="rounded bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
+              <span className="rounded bg-black/20 px-1.5 py-0.5 text-[11px] font-semibold">
                 {extraction ? `${extraction.parts.length} Parts` : "No extraction"}
               </span>
             </button>
@@ -161,65 +161,69 @@ export function TreeMenu({
               </button>
 
               {/* Part Details branch is populated from the current extraction. */}
-              {partList.length > 0 ? <div>
-                <div
-                  className={cn(
-                    "flex items-center rounded-md transition-colors",
-                    isPartSectionActive
-                      ? "bg-primary/90 text-primary-foreground font-semibold"
-                      : "text-[#f5d76e] hover:bg-white/10",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPartDetailsExpanded(!partDetailsExpanded);
-                    }}
+              {partList.length > 0 ? (
+                <div>
+                  <div
                     className={cn(
-                      "p-1.5",
+                      "flex items-center rounded-md transition-colors",
                       isPartSectionActive
-                        ? "text-primary-foreground/80 hover:opacity-80"
-                        : "text-white/60 hover:text-white",
+                        ? "bg-primary/90 text-primary-foreground font-semibold"
+                        : "text-[#f5d76e] hover:bg-white/10",
                     )}
-                    aria-label="Toggle Part Details menu"
                   >
-                    {partDetailsExpanded ? (
-                      <ChevronDown className="size-3" />
-                    ) : (
-                      <ChevronRight className="size-3" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate({ step: 1, section: partList[0].id })}
-                    className="flex flex-1 items-center gap-2 py-1.5 pr-2 text-left text-xs sm:text-sm font-medium"
-                  >
-                    <Box className="size-3.5 shrink-0" />
-                    <span className="truncate">Part Details</span>
-                  </button>
-                </div>
-
-                {partDetailsExpanded && (
-                  <div className="ml-4 space-y-0.5 border-l-2 border-white/15 pl-2">
-                    {partList.map((part) => (
-                      <button
-                        key={part.id}
-                        type="button"
-                        onClick={() => onNavigate({ step: 1, section: part.id })}
-                        className={cn(
-                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] sm:text-xs transition-colors font-medium",
-                          currentStep === 1 && currentSection === part.id
-                            ? "bg-primary text-primary-foreground font-semibold"
-                            : "text-[#f5d76e] hover:bg-white/10",
-                        )}
-                      >
-                        <span className="truncate">{part.label}</span>
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPartDetailsExpanded(!partDetailsExpanded);
+                      }}
+                      className={cn(
+                        "p-1.5",
+                        isPartSectionActive
+                          ? "text-primary-foreground/80 hover:opacity-80"
+                          : "text-white/60 hover:text-white",
+                      )}
+                      aria-label="Toggle Part Details menu"
+                    >
+                      {partDetailsExpanded ? (
+                        <ChevronDown className="size-3" />
+                      ) : (
+                        <ChevronRight className="size-3" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        partList[0] && onNavigate({ step: 1, section: partList[0].id })
+                      }
+                      className="flex flex-1 items-center gap-2 py-1.5 pr-2 text-left text-xs sm:text-sm font-medium"
+                    >
+                      <Box className="size-3.5 shrink-0" />
+                      <span className="truncate">Part Details</span>
+                    </button>
                   </div>
-                )}
-              </div> : null}
+
+                  {partDetailsExpanded && (
+                    <div className="ml-4 space-y-0.5 border-l-2 border-white/15 pl-2">
+                      {partList.map((part) => (
+                        <button
+                          key={part.id}
+                          type="button"
+                          onClick={() => onNavigate({ step: 1, section: part.id })}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] sm:text-xs transition-colors font-medium",
+                            currentStep === 1 && currentSection === part.id
+                              ? "bg-primary text-primary-foreground font-semibold"
+                              : "text-[#f5d76e] hover:bg-white/10",
+                          )}
+                        >
+                          <span className="truncate">{part.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           )}
         </div>

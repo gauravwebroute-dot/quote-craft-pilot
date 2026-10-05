@@ -116,7 +116,7 @@ export function QuoteHistoryDialog({
       }
 
       const merged = Array.from(map.values()).sort(
-        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
       );
       setQuotes(merged);
     } catch (err) {
@@ -137,7 +137,9 @@ export function QuoteHistoryDialog({
       // Try local storage first for instant load
       const allLocal = getLocalQuotes();
       const localMatch = allLocal.find(
-        (l) => l.draftSequenceId === quote.draftSequenceId || (quote.odooSequenceId && l.odooSequenceId === quote.odooSequenceId)
+        (l) =>
+          l.draftSequenceId === quote.draftSequenceId ||
+          (quote.odooSequenceId && l.odooSequenceId === quote.odooSequenceId),
       );
       if (localMatch?.formPayload) {
         onRehydrateState(quote, localMatch.formPayload);
@@ -236,7 +238,9 @@ export function QuoteHistoryDialog({
         <DialogHeader>
           <div className="flex items-center gap-2">
             <History className="size-5 text-primary" />
-            <DialogTitle className="text-xl font-bold">Quote History & Dual-Source Search</DialogTitle>
+            <DialogTitle className="text-xl font-bold">
+              Quote History & Dual-Source Search
+            </DialogTitle>
           </div>
           <DialogDescription>
             Search and manage historical quotes stored across local sessions and ERP sync records.
@@ -246,7 +250,12 @@ export function QuoteHistoryDialog({
         {actionMessage ? (
           <div className="rounded-md bg-muted px-3 py-2 text-xs font-medium flex items-center justify-between">
             <span>{actionMessage}</span>
-            <Button variant="ghost" size="sm" onClick={() => setActionMessage(null)} className="h-6 text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setActionMessage(null)}
+              className="h-6 text-xs"
+            >
               Dismiss
             </Button>
           </div>
@@ -336,7 +345,9 @@ export function QuoteHistoryDialog({
                         <div className="flex flex-col">
                           <span className="font-medium text-foreground">{quote.customerName}</span>
                           {quote.customerEmail ? (
-                            <span className="text-xs text-muted-foreground">{quote.customerEmail}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {quote.customerEmail}
+                            </span>
                           ) : null}
                         </div>
                       </td>

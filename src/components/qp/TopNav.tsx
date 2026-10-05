@@ -29,7 +29,9 @@ export function TopNav({
                 </span>
               ) : null}
             </div>
-            <div className="text-xs text-muted-foreground">RFQ Automation &amp; ERP Sync Engine</div>
+            <div className="text-xs text-muted-foreground">
+              RFQ Automation &amp; ERP Sync Engine
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
@@ -41,12 +43,7 @@ export function TopNav({
           >
             <History className="size-3.5" /> Quote History &amp; Search
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onSaveDraft}
-            className="gap-1.5 text-xs"
-          >
+          <Button variant="ghost" size="sm" onClick={onSaveDraft} className="gap-1.5 text-xs">
             <Save className="size-3.5" /> Save Draft
           </Button>
           <Button

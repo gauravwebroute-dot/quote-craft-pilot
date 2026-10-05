@@ -358,35 +358,25 @@ async function findLivePartner(uid, customer, companyId) {
 
   if (!partners || partners.length === 0) return null;
 
-  // Check partners specifically in this company
+  // FR-01/FR-03: partner.company_id is irrelevant; a customer is existing only if it has
+  // at least one non-cancelled sale order in the target company.
   for (const p of partners) {
-    if (p.company_id && p.company_id[0] === companyId) {
-      return p;
-    }
-  }
-
-  // If partner has no company_id (global partner in Odoo), verify if it has any active orders in this company
-  for (const p of partners) {
-    if (!p.company_id) {
-      try {
-        const orderCount = await odooCall("object", "execute_kw", [
-          process.env.ODOO_DB,
-          uid,
-          process.env.ODOO_API_KEY,
-          "sale.order",
-          "search_count",
-          [[
-            ["partner_id", "=", p.id],
-            ["company_id", "=", companyId],
-            ["state", "!=", "cancel"],
-          ]],
-        ]);
-        if (orderCount > 0) {
-          return p;
-        }
-      } catch {
-        // Continue checking
-      }
+    try {
+      const orderCount = await odooCall("object", "execute_kw", [
+        process.env.ODOO_DB,
+        uid,
+        process.env.ODOO_API_KEY,
+        "sale.order",
+        "search_count",
+        [[
+          ["partner_id", "=", p.id],
+          ["company_id", "=", companyId],
+          ["state", "!=", "cancel"],
+        ]],
+      ]);
+      if (orderCount > 0) return p;
+    } catch {
+      // Continue checking remaining partners
     }
   }
 

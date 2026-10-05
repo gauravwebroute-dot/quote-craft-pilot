@@ -18,7 +18,7 @@ import type { PricingResponse } from "@/components/qp/SectionExtraction";
  * - Order Lines/Quantity
  */
 export interface OdooCsvRow {
-  "Customer": string;
+  Customer: string;
   "Customer Reference": string;
   "Order Lines/Products": string;
   "Order Lines/Description": string;
@@ -43,11 +43,13 @@ export function mapQuotePilotToOdooCsv(
     const totalArea = Number(part.totalSurfaceAreaSqIn) || 0;
     const rawMasking = Number(part.maskingAreaSqIn) || 0;
     const maskingSqIn = Math.min(rawMasking, totalArea);
-    const coatingSqIn = part.coatingAreaSqIn != null
-      ? Number(part.coatingAreaSqIn)
-      : Math.max(0, Math.round((totalArea - maskingSqIn) * 100) / 100);
+    const coatingSqIn =
+      part.coatingAreaSqIn != null
+        ? Number(part.coatingAreaSqIn)
+        : Math.max(0, Math.round((totalArea - maskingSqIn) * 100) / 100);
 
-    const isMaskingNeeded = (priced?.breakdown?.masking?.cost ?? 0) > 0 ||
+    const isMaskingNeeded =
+      (priced?.breakdown?.masking?.cost ?? 0) > 0 ||
       maskingSqIn > 0 ||
       Boolean(part.dimensions?.holes && part.dimensions.holes.length > 0);
 
@@ -55,7 +57,7 @@ export function mapQuotePilotToOdooCsv(
       ? "Cerakote"
       : part.coatingBom?.topcoat || "Coating";
 
-    const pricePerSi = isMaskingNeeded ? 0.46 : 0.40;
+    const pricePerSi = isMaskingNeeded ? 0.46 : 0.4;
 
     const baseName = part.partName || part.partSummary || part.partNumber || "Coating Line Item";
     const partNumber = part.partNumber || "";
@@ -63,11 +65,13 @@ export function mapQuotePilotToOdooCsv(
     const quantity = Number(part.quantity) || 1;
     const effectiveArea = coatingSqIn > 0 ? coatingSqIn : totalArea;
     const maskText = maskingSqIn > 0 ? ` | Masking: ${maskingSqIn} si` : "";
-    const specText = part.milSpecNotes || part.specifications ? ` | Specs: ${part.milSpecNotes || part.specifications}` : "";
+    const extra = part as { milSpecNotes?: string; specifications?: string };
+    const specs = extra.milSpecNotes || extra.specifications;
+    const specText = specs ? ` | Specs: ${specs}` : "";
     const fullDescription = `${baseName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} +temp test`;
 
     return {
-      "Customer": customer,
+      Customer: customer,
       "Customer Reference": partNumber,
       "Order Lines/Products": partNumber,
       "Order Lines/Description": fullDescription,
@@ -124,7 +128,10 @@ export function downloadOdooCsv(
   const link = document.createElement("a");
   link.setAttribute("href", url);
   const cleanName = (customerName || "quotepilot").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
-  link.setAttribute("download", filename || `${cleanName}_odoo_import_${new Date().toISOString().slice(0, 10)}.csv`);
+  link.setAttribute(
+    "download",
+    filename || `${cleanName}_odoo_import_${new Date().toISOString().slice(0, 10)}.csv`,
+  );
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

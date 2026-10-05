@@ -3,13 +3,7 @@ import { cn } from "@/lib/utils";
 
 const steps = ["Input Form", "Extraction Results", "Odoo Cross-Check"];
 
-export function Stepper({
-  active,
-  onChange,
-}: {
-  active: number;
-  onChange: (i: number) => void;
-}) {
+export function Stepper({ active, onChange }: { active: number; onChange: (i: number) => void }) {
   return (
     <div className="sticky top-16 z-20 border-b border-border bg-background">
       <div className="mx-auto max-w-5xl overflow-x-auto px-4 py-4">
@@ -46,12 +40,7 @@ export function Stepper({
                   </span>
                 </button>
                 {i < steps.length - 1 ? (
-                  <span
-                    className={cn(
-                      "h-px flex-1",
-                      i < active ? "bg-success/50" : "bg-border",
-                    )}
-                  />
+                  <span className={cn("h-px flex-1", i < active ? "bg-success/50" : "bg-border")} />
                 ) : null}
               </li>
             );

@@ -41,7 +41,12 @@ export type PriceHistoryPart = {
   revision: string | null;
   priceHistory?: PriceHistoryEntry[];
   lookupNote?: string | null;
-  computedPrice: { pricePerUnit?: number; totalLineItem?: number; priced?: boolean; reason?: string };
+  computedPrice: {
+    pricePerUnit?: number;
+    totalLineItem?: number;
+    priced?: boolean;
+    reason?: string;
+  };
 };
 
 function formatMoney(value: number | null | undefined, currency?: string | null): string {
@@ -88,14 +93,14 @@ export function PriceHistoryDialog({
           <DialogDescription>
             {withHistory.length > 0 ? (
               <>
-                <strong>{customerName}</strong> has already been quoted for {withHistory.length} of the parts
-                in this RFQ under <strong>{businessUnit}</strong>. Compare the earlier prices below with the
-                newly calculated price before you send this quote.
+                <strong>{customerName}</strong> has already been quoted for {withHistory.length} of
+                the parts in this RFQ under <strong>{businessUnit}</strong>. Compare the earlier
+                prices below with the newly calculated price before you send this quote.
               </>
             ) : (
               <>
-                No earlier quotes were found for the parts in this RFQ under <strong>{customerName}</strong> in{" "}
-                <strong>{businessUnit}</strong>.
+                No earlier quotes were found for the parts in this RFQ under{" "}
+                <strong>{customerName}</strong> in <strong>{businessUnit}</strong>.
               </>
             )}
           </DialogDescription>
@@ -119,12 +124,15 @@ export function PriceHistoryDialog({
             const history = part.priceHistory ?? [];
             const latest = history[0];
             const currency = latest?.currency;
-            const newPrice = part.computedPrice?.priced === false ? null : part.computedPrice?.pricePerUnit;
+            const newPrice =
+              part.computedPrice?.priced === false ? null : part.computedPrice?.pricePerUnit;
             const lastPrice = latest?.pricePerUnit;
             const hasBoth = typeof newPrice === "number" && typeof lastPrice === "number";
             const diff = hasBoth ? newPrice - lastPrice : null;
             const pct = hasBoth && lastPrice !== 0 ? (diff! / lastPrice) * 100 : null;
-            const revisionChanged = Boolean(part.revision && latest?.revision && part.revision !== latest.revision);
+            const revisionChanged = Boolean(
+              part.revision && latest?.revision && part.revision !== latest.revision,
+            );
 
             const tone =
               diff === null || Math.abs(diff) < 0.005
@@ -132,13 +140,23 @@ export function PriceHistoryDialog({
                 : diff > 0
                   ? "text-[#B45309]"
                   : "text-[#1D4ED8]";
-            const Trend = diff === null || Math.abs(diff) < 0.005 ? Minus : diff > 0 ? TrendingUp : TrendingDown;
+            const Trend =
+              diff === null || Math.abs(diff) < 0.005
+                ? Minus
+                : diff > 0
+                  ? TrendingUp
+                  : TrendingDown;
 
             return (
-              <section key={`${part.partNumber}-${index}`} className="rounded-lg border border-border">
+              <section
+                key={`${part.partNumber}-${index}`}
+                className="rounded-lg border border-border"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm font-semibold">{part.partNumber || "Unknown part"}</span>
+                    <span className="font-mono text-sm font-semibold">
+                      {part.partNumber || "Unknown part"}
+                    </span>
                     {part.revision ? <Badge variant="outline">Rev {part.revision}</Badge> : null}
                     {revisionChanged ? (
                       <Badge className="bg-[#D97706] text-white hover:bg-[#D97706]">
@@ -154,8 +172,12 @@ export function PriceHistoryDialog({
 
                 <div className="grid gap-3 px-4 py-3 sm:grid-cols-3">
                   <div>
-                    <div className="text-xs text-muted-foreground">Last quoted ({formatDate(latest?.quotedAt)})</div>
-                    <div className="font-mono text-lg font-semibold">{formatMoney(lastPrice, currency)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Last quoted ({formatDate(latest?.quotedAt)})
+                    </div>
+                    <div className="font-mono text-lg font-semibold">
+                      {formatMoney(lastPrice, currency)}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       per unit{latest?.saleOrderName ? ` · ${latest.saleOrderName}` : ""}
                     </div>
@@ -163,13 +185,17 @@ export function PriceHistoryDialog({
                   <div>
                     <div className="text-xs text-muted-foreground">New calculated price</div>
                     <div className="font-mono text-lg font-semibold">
-                      {newPrice === null || newPrice === undefined ? "Not enough data" : formatMoney(newPrice, currency)}
+                      {newPrice === null || newPrice === undefined
+                        ? "Not enough data"
+                        : formatMoney(newPrice, currency)}
                     </div>
                     <div className="text-xs text-muted-foreground">per unit</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Difference</div>
-                    <div className={`flex items-center gap-1.5 font-mono text-lg font-semibold ${tone}`}>
+                    <div
+                      className={`flex items-center gap-1.5 font-mono text-lg font-semibold ${tone}`}
+                    >
                       <Trend className="size-4" />
                       {diff === null
                         ? "—"
@@ -207,16 +233,24 @@ export function PriceHistoryDialog({
                           <TableCell className="font-mono text-xs">
                             {h.saleOrderName || "—"}
                             {h.matchedBy === "part name" ? (
-                              <div className="font-sans text-[10px] font-normal text-muted-foreground">matched by part name</div>
+                              <div className="font-sans text-[10px] font-normal text-muted-foreground">
+                                matched by part name
+                              </div>
                             ) : null}
                           </TableCell>
                           <TableCell className="text-xs">{formatDate(h.quotedAt)}</TableCell>
                           <TableCell className="text-xs">{h.stateLabel || "—"}</TableCell>
                           <TableCell className="text-xs">{h.revision || "—"}</TableCell>
-                          <TableCell className="text-right font-mono text-xs">{h.quantity ?? "—"}</TableCell>
-                          <TableCell className="text-right font-mono text-xs">{h.sqInPerUnit ?? "—"}</TableCell>
                           <TableCell className="text-right font-mono text-xs">
-                            {h.pricePerSi === null || h.pricePerSi === undefined ? "—" : h.pricePerSi}
+                            {h.quantity ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {h.sqInPerUnit ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {h.pricePerSi === null || h.pricePerSi === undefined
+                              ? "—"
+                              : h.pricePerSi}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs font-semibold">
                             {formatMoney(h.pricePerUnit, h.currency)}
@@ -238,7 +272,10 @@ export function PriceHistoryDialog({
         </div>
 
         <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90">
+          <Button
+            onClick={() => onOpenChange(false)}
+            className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90"
+          >
             I've reviewed the earlier prices
           </Button>
         </DialogFooter>

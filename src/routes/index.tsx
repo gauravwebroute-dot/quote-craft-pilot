@@ -141,7 +141,8 @@ function QuotePilot() {
     saveLocalQuote({
       draftSequenceId,
       businessUnit,
-      customerName: extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
+      customerName:
+        extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
       customerEmail: extraction.customer?.email || null,
       sourceFile: uploadedFiles[0]?.name || "manual_draft.pdf",
       formPayload: extraction,

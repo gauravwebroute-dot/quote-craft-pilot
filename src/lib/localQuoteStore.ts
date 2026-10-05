@@ -58,31 +58,43 @@ export function getLocalQuotes(): StoredQuoteItem[] {
   }
 }
 
-export function saveLocalQuote(quote: Partial<StoredQuoteItem> & { draftSequenceId: string }): StoredQuoteItem {
+export function saveLocalQuote(
+  quote: Partial<StoredQuoteItem> & { draftSequenceId: string },
+): StoredQuoteItem {
   if (typeof window === "undefined") {
     return quote as StoredQuoteItem;
   }
   const quotes = getLocalQuotes();
   const existingIdx = quotes.findIndex(
-    (q) => q.draftSequenceId === quote.draftSequenceId || (quote.odooSequenceId && q.odooSequenceId === quote.odooSequenceId)
+    (q) =>
+      q.draftSequenceId === quote.draftSequenceId ||
+      (quote.odooSequenceId && q.odooSequenceId === quote.odooSequenceId),
   );
 
+  const prev = existingIdx >= 0 ? quotes[existingIdx] : undefined;
+
   const fullRecord: StoredQuoteItem = {
-    id: existingIdx >= 0 ? quotes[existingIdx].id : Date.now(),
+    id: prev?.id ?? Date.now(),
     draftSequenceId: quote.draftSequenceId,
     quoteNumber: quote.quoteNumber || quote.draftSequenceId,
-    odooSequenceId: quote.odooSequenceId || (existingIdx >= 0 ? quotes[existingIdx].odooSequenceId : null),
-    businessUnit: quote.businessUnit || (existingIdx >= 0 ? quotes[existingIdx].businessUnit : "OC Custom Coating"),
-    customerName: quote.customerName || (existingIdx >= 0 ? quotes[existingIdx].customerName : "Standard Customer"),
-    customerEmail: quote.customerEmail || null,
-    pdfHash: quote.pdfHash || null,
-    sourceFile: quote.sourceFile || null,
-    status: quote.status || (existingIdx >= 0 ? quotes[existingIdx].status : "DRAFT"),
-    createdAt: existingIdx >= 0 ? quotes[existingIdx].createdAt : new Date().toISOString(),
+    odooSequenceId: quote.odooSequenceId || prev?.odooSequenceId || null,
+    businessUnit: quote.businessUnit || prev?.businessUnit || "OC Custom Coating",
+    customerName: quote.customerName || prev?.customerName || "Standard Customer",
+    customerEmail: quote.customerEmail || prev?.customerEmail || null,
+    pdfHash: quote.pdfHash || prev?.pdfHash || null,
+    sourceFile: quote.sourceFile || prev?.sourceFile || null,
+    status: quote.status || prev?.status || "DRAFT",
+    createdAt: prev?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    revisionCount: existingIdx >= 0 ? quotes[existingIdx].revisionCount : 1,
-    lineItemCount: quote.formPayload?.parts?.length || (existingIdx >= 0 ? quotes[existingIdx].lineItemCount : 1),
-    formPayload: quote.formPayload || (existingIdx >= 0 ? quotes[existingIdx].formPayload : undefined),
+    revisionCount: prev?.revisionCount ?? 1,
+    lineItemCount: quote.formPayload?.parts?.length || prev?.lineItemCount || 1,
+    ...((quote.formPayload ?? prev?.formPayload)
+      ? {
+          formPayload: (quote.formPayload ?? prev?.formPayload) as NonNullable<
+            StoredQuoteItem["formPayload"]
+          >,
+        }
+      : {}),
   };
 
   const previousStatus = existingIdx >= 0 ? (quotes[existingIdx]?.status ?? null) : null;
@@ -96,14 +108,21 @@ export function saveLocalQuote(quote: Partial<StoredQuoteItem> & { draftSequence
   localStorage.setItem(STORAGE_KEY_QUOTES, JSON.stringify(quotes));
 
   // Advance sequence counter if this was synced or exported
-  if ((fullRecord.status === "SYNCED" || fullRecord.status === "EXCEL_EXPORTED") && previousStatus !== fullRecord.status) {
+  if (
+    (fullRecord.status === "SYNCED" || fullRecord.status === "EXCEL_EXPORTED") &&
+    previousStatus !== fullRecord.status
+  ) {
     advanceLocalSequence();
   }
 
   return fullRecord;
 }
 
-export function searchLocalQuotes(query = "", businessUnit = "all", status = "all"): StoredQuoteItem[] {
+export function searchLocalQuotes(
+  query = "",
+  businessUnit = "all",
+  status = "all",
+): StoredQuoteItem[] {
   const quotes = getLocalQuotes();
   const q = query.trim().toLowerCase();
 
@@ -114,7 +133,7 @@ export function searchLocalQuotes(query = "", businessUnit = "all", status = "al
       const matchCust = item.customerName?.toLowerCase().includes(q);
       const matchFile = item.sourceFile?.toLowerCase().includes(q);
       const matchParts = item.formPayload?.parts?.some(
-        (p) => p.partNumber?.toLowerCase().includes(q) || p.partName?.toLowerCase().includes(q)
+        (p) => p.partNumber?.toLowerCase().includes(q) || p.partName?.toLowerCase().includes(q),
       );
       if (!matchSeq && !matchOdoo && !matchCust && !matchFile && !matchParts) {
         return false;

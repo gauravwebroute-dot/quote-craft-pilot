@@ -67,7 +67,12 @@ type PartCrossCheck = {
   revision: string | null;
   sourceFile: string | null;
   reason: "NEW_CUSTOMER" | "EXISTING_QUOTE_FOUND" | "NO_PRIOR_QUOTE_FOR_THIS_PART";
-  previousQuote: { pricePerUnit?: number; revision?: string | null; quotedAt?: string; saleOrderName?: string } | null;
+  previousQuote: {
+    pricePerUnit?: number;
+    revision?: string | null;
+    quotedAt?: string;
+    saleOrderName?: string;
+  } | null;
   priorQuotes?: PriorQuoteDetail[];
   computedPrice: {
     pricePerUnit?: number;
@@ -124,7 +129,8 @@ const REASON_LABEL: Record<PartCrossCheck["reason"], string> = {
 function apiUrl() {
   return (
     import.meta.env["VITE_EXTRACTION_API_URL"] ||
-    (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    (typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
       ? "http://localhost:4000"
       : "https://quote-craft-pilot.onrender.com")
   ).replace(/\/$/, "");
@@ -208,29 +214,36 @@ export function SectionOdoo({
     }
   }, [extraction, businessUnit]);
 
-  const handleResolutionChange = (conflictId: string, resolution: "keep_extracted" | "use_odoo" | "manual") => {
-    setConflicts((prev) =>
-      prev.map((c) => (c.id === conflictId ? { ...c, resolution } : c)),
-    );
+  const handleResolutionChange = (
+    conflictId: string,
+    resolution: "keep_extracted" | "use_odoo" | "manual",
+  ) => {
+    setConflicts((prev) => prev.map((c) => (c.id === conflictId ? { ...c, resolution } : c)));
   };
 
   const handleManualValueChange = (conflictId: string, manualValue: string) => {
-    setConflicts((prev) =>
-      prev.map((c) => (c.id === conflictId ? { ...c, manualValue } : c)),
-    );
+    setConflicts((prev) => prev.map((c) => (c.id === conflictId ? { ...c, manualValue } : c)));
   };
 
   // REQ-008: Sync Guard Rule - The Sync to Odoo button is disabled until every conflict has an explicit selection
-  const allConflictsResolved = conflicts.length === 0 || conflicts.every((c) => {
-    if (!c.resolution) return false;
-    if (c.resolution === "manual" && !c.manualValue.trim()) return false;
-    return true;
-  });
+  const allConflictsResolved =
+    conflicts.length === 0 ||
+    conflicts.every((c) => {
+      if (!c.resolution) return false;
+      if (c.resolution === "manual" && !c.manualValue.trim()) return false;
+      return true;
+    });
 
   const handleDownloadCsv = () => {
     if (!extraction?.parts?.length) return;
-    const customer = extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
-    downloadOdooCsv(extraction.parts, customer, null, `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`);
+    const customer =
+      extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
+    downloadOdooCsv(
+      extraction.parts,
+      customer,
+      null,
+      `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`,
+    );
 
     // 1. Save locally
     if (quoteNumber) {
@@ -278,17 +291,19 @@ export function SectionOdoo({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to create Odoo quotation.");
 
-      const createdOrderName = payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
+      const createdOrderName =
+        payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
       setSyncedOrder(createdOrderName);
 
       // 1. Save to local browser storage immediately
-      let nextSeq = advanceLocalSequence();
+      const nextSeq = advanceLocalSequence();
       if (quoteNumber) {
         saveLocalQuote({
           draftSequenceId: quoteNumber,
           odooSequenceId: createdOrderName,
           status: "SYNCED",
-          customerName: extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
+          customerName:
+            extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
           businessUnit,
           formPayload: extraction,
         });
@@ -324,7 +339,9 @@ export function SectionOdoo({
     if (!part.partNumber) return;
     setCreatingPart(part.partNumber);
     try {
-      const partToCreate = extraction?.parts?.find((p) => (p.partNumber ?? null) === part.partNumber);
+      const partToCreate = extraction?.parts?.find(
+        (p) => (p.partNumber ?? null) === part.partNumber,
+      );
       if (!partToCreate) throw new Error("Part data not found in extraction.");
 
       const response = await fetch(`${apiUrl()}/api/odoo/create-quotation`, {
@@ -345,7 +362,8 @@ export function SectionOdoo({
       setCreateResults((prev) => ({
         ...prev,
         [part.partNumber!]: {
-          error: requestError instanceof Error ? requestError.message : "Failed to add part to Odoo.",
+          error:
+            requestError instanceof Error ? requestError.message : "Failed to add part to Odoo.",
         },
       }));
     } finally {
@@ -357,37 +375,59 @@ export function SectionOdoo({
     if (part) {
       setSelectedPartForHistory(part);
     } else {
-      const firstWithHistory = crossCheck?.parts.find((p) => p.previousQuote || (p.priorQuotes && p.priorQuotes.length > 0));
+      const firstWithHistory = crossCheck?.parts.find(
+        (p) => p.previousQuote || (p.priorQuotes && p.priorQuotes.length > 0),
+      );
       setSelectedPartForHistory(firstWithHistory || crossCheck?.parts[0] || null);
     }
     setPriceHistoryOpen(true);
   };
 
-  const clientStatus = crossCheck?.subChecks?.clientVerification?.status ||
+  const clientStatus =
+    crossCheck?.subChecks?.clientVerification?.status ||
     (crossCheck?.customer?.matched ? "COMPLETE" : crossCheck ? "NEEDS_ATTENTION" : "NOT_STARTED");
 
-  const partStatus = crossCheck?.subChecks?.partMasterSync?.status ||
+  const partStatus =
+    crossCheck?.subChecks?.partMasterSync?.status ||
     (conflicts.length > 0 ? "CONFLICT" : crossCheck?.parts?.length ? "COMPLETE" : "NOT_STARTED");
 
-  const exportStatus = crossCheck?.subChecks?.exportQuotationCheck?.status ||
+  const exportStatus =
+    crossCheck?.subChecks?.exportQuotationCheck?.status ||
     (crossCheck ? "COMPLETE" : "NOT_STARTED");
 
   const getIndicatorBadge = (status: string, defaultLabel: string) => {
     switch (status) {
       case "COMPLETE":
-        return <Badge className="bg-[#1B4332] text-white hover:bg-[#1B4332] font-semibold"><Check className="size-3 mr-1" /> Complete</Badge>;
+        return (
+          <Badge className="bg-[#1B4332] text-white hover:bg-[#1B4332] font-semibold">
+            <Check className="size-3 mr-1" /> Complete
+          </Badge>
+        );
       case "CONFLICT":
-        return <Badge className="bg-[#DC2626] text-white hover:bg-[#DC2626] font-semibold"><AlertTriangle className="size-3 mr-1" /> Conflict / Error</Badge>;
+        return (
+          <Badge className="bg-[#DC2626] text-white hover:bg-[#DC2626] font-semibold">
+            <AlertTriangle className="size-3 mr-1" /> Conflict / Error
+          </Badge>
+        );
       case "NEEDS_ATTENTION":
-        return <Badge className="bg-[#D97706] text-white hover:bg-[#D97706] font-semibold"><AlertCircle className="size-3 mr-1" /> Needs Action</Badge>;
+        return (
+          <Badge className="bg-[#D97706] text-white hover:bg-[#D97706] font-semibold">
+            <AlertCircle className="size-3 mr-1" /> Needs Action
+          </Badge>
+        );
       default:
-        return <Badge className="bg-[#6C757D] text-white hover:bg-[#6C757D] font-medium"><Clock className="size-3 mr-1" /> Pending</Badge>;
+        return (
+          <Badge className="bg-[#6C757D] text-white hover:bg-[#6C757D] font-medium">
+            <Clock className="size-3 mr-1" /> Pending
+          </Badge>
+        );
     }
   };
 
-  const partsWithPriorQuotes = crossCheck?.parts.filter(
-    (p) => p.previousQuote || (p.priorQuotes && p.priorQuotes.length > 0)
-  ) || [];
+  const partsWithPriorQuotes =
+    crossCheck?.parts.filter(
+      (p) => p.previousQuote || (p.priorQuotes && p.priorQuotes.length > 0),
+    ) || [];
 
   return (
     <div className="space-y-6">
@@ -396,13 +436,16 @@ export function SectionOdoo({
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Odoo Cross-Check & Sync</h1>
             <p className="mt-1 text-base text-muted-foreground">
-              Verify extracted data against live ERP records, reconcile any discrepancies, and finalize sync.
+              Verify extracted data against live ERP records, reconcile any discrepancies, and
+              finalize sync.
             </p>
           </div>
           {syncedOrder ? (
             <div className="flex items-center gap-2 rounded-lg bg-[#1B4332]/10 border border-[#1B4332]/30 px-3 py-2 text-[#1B4332] dark:text-emerald-400">
               <Lock className="size-4" />
-              <span className="text-sm font-semibold">Locked: {quoteNumber} &rarr; {syncedOrder}</span>
+              <span className="text-sm font-semibold">
+                Locked: {quoteNumber} &rarr; {syncedOrder}
+              </span>
             </div>
           ) : (
             <Badge variant="outline" className="font-mono text-xs border-[#374151]">
@@ -415,7 +458,11 @@ export function SectionOdoo({
       {/* Primary Actions Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button onClick={runCrossCheck} disabled={isChecking} className="bg-primary hover:bg-primary/90">
+          <Button
+            onClick={runCrossCheck}
+            disabled={isChecking}
+            className="bg-primary hover:bg-primary/90"
+          >
             <RefreshCw className={`size-4 mr-1.5 ${isChecking ? "animate-spin" : ""}`} />
             {isChecking ? "Verifying..." : "Run Cross-Check"}
           </Button>
@@ -427,7 +474,11 @@ export function SectionOdoo({
             className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90 disabled:opacity-50"
           >
             <ShieldCheck className="size-4 mr-1.5" />
-            {isSyncing ? "Syncing..." : syncedOrder ? `Synced to Odoo (${syncedOrder})` : "Sync to Odoo"}
+            {isSyncing
+              ? "Syncing..."
+              : syncedOrder
+                ? `Synced to Odoo (${syncedOrder})`
+                : "Sync to Odoo"}
           </Button>
 
           {/* Price History Button (Matches Screenshot 2 & opens modal) */}
@@ -463,7 +514,8 @@ export function SectionOdoo({
             {getIndicatorBadge(clientStatus, "Pending")}
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {crossCheck?.subChecks?.clientVerification?.message || "Validates customer in res.partner."}
+            {crossCheck?.subChecks?.clientVerification?.message ||
+              "Validates customer in res.partner."}
           </p>
         </div>
       </div>
@@ -481,14 +533,17 @@ export function SectionOdoo({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-[#DC2626]">
                 <GitCompare className="size-5" />
-                <CardTitle className="text-lg font-bold">Conflict / Diff Reconciliation View</CardTitle>
+                <CardTitle className="text-lg font-bold">
+                  Conflict / Diff Reconciliation View
+                </CardTitle>
               </div>
               <Badge className="bg-[#DC2626] text-white font-semibold">
                 {conflicts.length} Conflict{conflicts.length === 1 ? "" : "s"} Detected
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Discrepancies found between extracted drawing data and stored Odoo master records. Resolve all before syncing.
+              Discrepancies found between extracted drawing data and stored Odoo master records.
+              Resolve all before syncing.
             </p>
           </CardHeader>
           <CardContent className="p-4 space-y-4">
@@ -497,8 +552,16 @@ export function SectionOdoo({
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-sm">{c.fieldName}</span>
                   {c.resolution ? (
-                    <Badge variant="outline" className="text-xs border-[#1B4332] text-[#1B4332] dark:text-emerald-400">
-                      Resolved: {c.resolution === "keep_extracted" ? "Keep Extracted" : c.resolution === "use_odoo" ? "Use Odoo" : "Manual"}
+                    <Badge
+                      variant="outline"
+                      className="text-xs border-[#1B4332] text-[#1B4332] dark:text-emerald-400"
+                    >
+                      Resolved:{" "}
+                      {c.resolution === "keep_extracted"
+                        ? "Keep Extracted"
+                        : c.resolution === "use_odoo"
+                          ? "Use Odoo"
+                          : "Manual"}
                     </Badge>
                   ) : (
                     <Badge variant="outline" className="text-xs border-[#DC2626] text-[#DC2626]">
@@ -510,11 +573,15 @@ export function SectionOdoo({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                   <div className="p-2.5 rounded bg-muted/40 border border-border">
                     <span className="text-muted-foreground block mb-1">Extracted Value:</span>
-                    <span className="font-mono font-bold text-foreground text-sm">{c.extractedValue}</span>
+                    <span className="font-mono font-bold text-foreground text-sm">
+                      {c.extractedValue}
+                    </span>
                   </div>
                   <div className="p-2.5 rounded bg-muted/40 border border-border">
                     <span className="text-muted-foreground block mb-1">Odoo Master Value:</span>
-                    <span className="font-mono font-bold text-foreground text-sm">{c.odooMasterValue}</span>
+                    <span className="font-mono font-bold text-foreground text-sm">
+                      {c.odooMasterValue}
+                    </span>
                   </div>
                 </div>
 
@@ -527,15 +594,21 @@ export function SectionOdoo({
                   >
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="keep_extracted" id={`${c.id}-ext`} />
-                      <Label htmlFor={`${c.id}-ext`} className="cursor-pointer">Keep Extracted Value</Label>
+                      <Label htmlFor={`${c.id}-ext`} className="cursor-pointer">
+                        Keep Extracted Value
+                      </Label>
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="use_odoo" id={`${c.id}-odoo`} />
-                      <Label htmlFor={`${c.id}-odoo`} className="cursor-pointer">Use Odoo Master Record</Label>
+                      <Label htmlFor={`${c.id}-odoo`} className="cursor-pointer">
+                        Use Odoo Master Record
+                      </Label>
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="manual" id={`${c.id}-manual`} />
-                      <Label htmlFor={`${c.id}-manual`} className="cursor-pointer">Manual Value</Label>
+                      <Label htmlFor={`${c.id}-manual`} className="cursor-pointer">
+                        Manual Value
+                      </Label>
                     </div>
                   </RadioGroup>
 
@@ -568,8 +641,16 @@ export function SectionOdoo({
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
               <span className="font-medium text-sm">Customer Record Match:</span>
-              <Badge className={crossCheck.customer?.matched ? "bg-[#1B4332] text-white font-medium" : "bg-[#D97706] text-white font-medium"}>
-                {crossCheck.customer?.matched ? "Existing Partner in Odoo" : "New Customer (Will Create Partner)"}
+              <Badge
+                className={
+                  crossCheck.customer?.matched
+                    ? "bg-[#1B4332] text-white font-medium"
+                    : "bg-[#D97706] text-white font-medium"
+                }
+              >
+                {crossCheck.customer?.matched
+                  ? "Existing Partner in Odoo"
+                  : "New Customer (Will Create Partner)"}
               </Badge>
             </div>
 
@@ -580,14 +661,22 @@ export function SectionOdoo({
                 const alreadyCreated =
                   createResult && "created" in createResult && createResult.created;
                 const canAddToOdoo = part.reason !== "EXISTING_QUOTE_FOUND" && !syncedOrder;
-                const hasPriorQuotes = Boolean(part.previousQuote || (part.priorQuotes && part.priorQuotes.length > 0));
+                const hasPriorQuotes = Boolean(
+                  part.previousQuote || (part.priorQuotes && part.priorQuotes.length > 0),
+                );
 
                 return (
                   <div key={key} className="rounded-lg border border-border p-3.5 bg-surface">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span className="font-semibold text-foreground text-sm font-mono">{part.partNumber || "Unknown part"}</span>
+                      <span className="font-semibold text-foreground text-sm font-mono">
+                        {part.partNumber || "Unknown part"}
+                      </span>
                       <Badge
-                        className={part.reason === "EXISTING_QUOTE_FOUND" ? "bg-[#1B4332] text-white" : "bg-[#D97706] text-white"}
+                        className={
+                          part.reason === "EXISTING_QUOTE_FOUND"
+                            ? "bg-[#1B4332] text-white"
+                            : "bg-[#D97706] text-white"
+                        }
                       >
                         {REASON_LABEL[part.reason]}
                       </Badge>
@@ -622,7 +711,11 @@ export function SectionOdoo({
 
                     {part.reason === "NO_PRIOR_QUOTE_FOR_THIS_PART" && (
                       <p className="mt-2 text-xs text-muted-foreground">
-                        Searched customer records for "{crossCheck.customer?.record?.name || extraction?.customer?.company || "this customer"}" in this company; no earlier quote line matched part {part.partNumber}.
+                        Searched customer records for "
+                        {crossCheck.customer?.record?.name ||
+                          extraction?.customer?.company ||
+                          "this customer"}
+                        " in this company; no earlier quote line matched part {part.partNumber}.
                       </p>
                     )}
 
@@ -640,8 +733,6 @@ export function SectionOdoo({
                       </div>
                     )}
 
-                    
-
                     {alreadyCreated ? (
                       <Alert className="mt-3 border-[#1B4332]/30 bg-[#1B4332]/10">
                         <CheckCircle2 className="size-4 text-[#1B4332] dark:text-emerald-400" />
@@ -657,7 +748,9 @@ export function SectionOdoo({
 
                     {createResult && "error" in createResult ? (
                       <Alert variant="destructive" className="mt-3">
-                        <AlertDescription className="text-xs">{createResult.error}</AlertDescription>
+                        <AlertDescription className="text-xs">
+                          {createResult.error}
+                        </AlertDescription>
                       </Alert>
                     ) : null}
                   </div>
@@ -687,132 +780,174 @@ export function SectionOdoo({
               </DialogTitle>
             </div>
             <DialogDescription className="text-sm text-muted-foreground mt-1.5">
-              <strong>{crossCheck?.customer?.record?.name || extraction?.customer?.company || "Customer"}</strong> has already been quoted for {partsWithPriorQuotes.length > 0 ? partsWithPriorQuotes.length : 1} of the parts in this RFQ under <strong>{businessUnit}</strong>. Compare the earlier prices below with the newly calculated price before you send this quote.
+              <strong>
+                {crossCheck?.customer?.record?.name || extraction?.customer?.company || "Customer"}
+              </strong>{" "}
+              has already been quoted for{" "}
+              {partsWithPriorQuotes.length > 0 ? partsWithPriorQuotes.length : 1} of the parts in
+              this RFQ under <strong>{businessUnit}</strong>. Compare the earlier prices below with
+              the newly calculated price before you send this quote.
             </DialogDescription>
           </DialogHeader>
 
           <div className="mt-4 space-y-6">
-            {(selectedPartForHistory ? [selectedPartForHistory] : partsWithPriorQuotes).map((part, pIdx) => {
-              const prevPrice = part.previousQuote?.pricePerUnit ?? (part.priorQuotes?.[0]?.unitPrice ?? 0);
-              const newPrice = part.computedPrice?.pricePerUnit ?? 0;
-              const diff = newPrice - prevPrice;
-              const diffPct = prevPrice > 0 ? ((diff / prevPrice) * 100).toFixed(1) : "0.0";
-              const isHigher = diff > 0;
-              const quotesList = part.priorQuotes && part.priorQuotes.length > 0 ? part.priorQuotes : [
-                {
-                  id: 1,
-                  quoteName: part.previousQuote?.saleOrderName || "S00075",
-                  date: part.previousQuote?.quotedAt || "05 Oct 2026",
-                  status: "Quotation",
-                  revision: part.previousQuote?.revision || part.revision || "C00",
-                  quantity: 3,
-                  areaSqIn: 184,
-                  pricePerSi: 0.4,
-                  unitPrice: prevPrice || 5.0,
-                  lineTotal: (prevPrice || 5.0) * 3,
-                  quoteTotal: (prevPrice || 5.0) * 3,
-                }
-              ];
+            {(selectedPartForHistory ? [selectedPartForHistory] : partsWithPriorQuotes).map(
+              (part, pIdx) => {
+                const prevPrice =
+                  part.previousQuote?.pricePerUnit ?? part.priorQuotes?.[0]?.unitPrice ?? 0;
+                const newPrice = part.computedPrice?.pricePerUnit ?? 0;
+                const diff = newPrice - prevPrice;
+                const diffPct = prevPrice > 0 ? ((diff / prevPrice) * 100).toFixed(1) : "0.0";
+                const isHigher = diff > 0;
+                const quotesList =
+                  part.priorQuotes && part.priorQuotes.length > 0
+                    ? part.priorQuotes
+                    : [
+                        {
+                          id: 1,
+                          quoteName: part.previousQuote?.saleOrderName || "S00075",
+                          date: part.previousQuote?.quotedAt || "05 Oct 2026",
+                          status: "Quotation",
+                          revision: part.previousQuote?.revision || part.revision || "C00",
+                          quantity: 3,
+                          areaSqIn: 184,
+                          pricePerSi: 0.4,
+                          unitPrice: prevPrice || 5.0,
+                          lineTotal: (prevPrice || 5.0) * 3,
+                          quoteTotal: (prevPrice || 5.0) * 3,
+                        },
+                      ];
 
-              return (
-                <div key={part.partNumber || pIdx} className="rounded-lg border border-border p-4 space-y-4 bg-muted/20">
-                  {/* Part Header */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-base font-mono">{part.partNumber || "117-0018-001"}</span>
-                      <Badge variant="secondary" className="font-mono text-xs">
-                        Rev {part.revision || "C00"}
-                      </Badge>
-                    </div>
-                    <span className="text-xs text-muted-foreground font-medium">
-                      {quotesList.length} earlier quote{quotesList.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-
-                  {/* Summary Comparison Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-card p-3.5 rounded-lg border border-border">
-                    <div>
-                      <span className="text-xs text-muted-foreground block">
-                        Last quoted ({part.previousQuote?.quotedAt || "05 Oct 2026"})
-                      </span>
-                      <div className="mt-1">
-                        <span className="text-2xl font-bold font-mono text-foreground">{money(prevPrice)}</span>
+                return (
+                  <div
+                    key={part.partNumber || pIdx}
+                    className="rounded-lg border border-border p-4 space-y-4 bg-muted/20"
+                  >
+                    {/* Part Header */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-base font-mono">
+                          {part.partNumber || "117-0018-001"}
+                        </span>
+                        <Badge variant="secondary" className="font-mono text-xs">
+                          Rev {part.revision || "C00"}
+                        </Badge>
                       </div>
-                      <span className="text-[11px] text-muted-foreground">
-                        per unit · {part.previousQuote?.saleOrderName || quotesList[0]?.quoteName || "S00075"}
+                      <span className="text-xs text-muted-foreground font-medium">
+                        {quotesList.length} earlier quote{quotesList.length === 1 ? "" : "s"}
                       </span>
                     </div>
 
-                    <div>
-                      <span className="text-xs text-muted-foreground block">
-                        New calculated price
-                      </span>
-                      <div className="mt-1">
-                        <span className="text-2xl font-bold font-mono text-foreground">{money(newPrice)}</span>
+                    {/* Summary Comparison Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-card p-3.5 rounded-lg border border-border">
+                      <div>
+                        <span className="text-xs text-muted-foreground block">
+                          Last quoted ({part.previousQuote?.quotedAt || "05 Oct 2026"})
+                        </span>
+                        <div className="mt-1">
+                          <span className="text-2xl font-bold font-mono text-foreground">
+                            {money(prevPrice)}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground">
+                          per unit ·{" "}
+                          {part.previousQuote?.saleOrderName ||
+                            quotesList[0]?.quoteName ||
+                            "S00075"}
+                        </span>
                       </div>
-                      <span className="text-[11px] text-muted-foreground">
-                        per unit
-                      </span>
-                    </div>
 
-                    <div>
-                      <span className="text-xs text-muted-foreground block">
-                        Difference
-                      </span>
-                      <div className={`mt-1 flex items-center gap-1 font-bold font-mono text-xl ${isHigher ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}>
-                        {isHigher ? <TrendingUp className="size-4 inline" /> : <TrendingDown className="size-4 inline" />}
-                        {isHigher ? `+${money(Math.abs(diff))}` : `-${money(Math.abs(diff))}`}
+                      <div>
+                        <span className="text-xs text-muted-foreground block">
+                          New calculated price
+                        </span>
+                        <div className="mt-1">
+                          <span className="text-2xl font-bold font-mono text-foreground">
+                            {money(newPrice)}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground">per unit</span>
                       </div>
-                      <span className={`text-[11px] font-medium ${isHigher ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}>
-                        {isHigher ? `+${diffPct}%` : `-${Math.abs(Number(diffPct))}%`} vs last quote
-                      </span>
-                    </div>
-                  </div>
 
-                  {/* Table of Earlier Quotes */}
-                  <div className="overflow-x-auto rounded border border-border">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-muted/60 text-muted-foreground border-b border-border">
-                        <tr>
-                          <th className="px-3 py-2.5 font-medium">Quote</th>
-                          <th className="px-3 py-2.5 font-medium">Date</th>
-                          <th className="px-3 py-2.5 font-medium">Status</th>
-                          <th className="px-3 py-2.5 font-medium">Rev</th>
-                          <th className="px-3 py-2.5 font-medium text-right">Qty</th>
-                          <th className="px-3 py-2.5 font-medium text-right">Sq. in</th>
-                          <th className="px-3 py-2.5 font-medium text-right">Price / SI</th>
-                          <th className="px-3 py-2.5 font-medium text-right">Unit price</th>
-                          <th className="px-3 py-2.5 font-medium text-right">Line total</th>
-                          <th className="px-3 py-2.5 font-medium text-right">Quote total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border bg-card font-mono">
-                        {quotesList.map((q, qIdx) => (
-                          <tr key={q.id || qIdx} className="hover:bg-muted/40 transition-colors">
-                            <td className="px-3 py-2 font-semibold text-foreground">
-                              {q.quoteName}
-                            </td>
-                            <td className="px-3 py-2 text-muted-foreground">{q.date}</td>
-                            <td className="px-3 py-2 font-sans">
-                              <Badge variant="outline" className="text-[10px] font-semibold text-muted-foreground border-[#374151]">
-                                {q.status}
-                              </Badge>
-                            </td>
-                            <td className="px-3 py-2 text-muted-foreground">{q.revision}</td>
-                            <td className="px-3 py-2 text-right text-foreground">{q.quantity}</td>
-                            <td className="px-3 py-2 text-right text-foreground">{q.areaSqIn || 0}</td>
-                            <td className="px-3 py-2 text-right text-foreground">{money(q.pricePerSi)}</td>
-                            <td className="px-3 py-2 text-right font-bold text-foreground">{money(q.unitPrice)}</td>
-                            <td className="px-3 py-2 text-right text-foreground">{money(q.lineTotal)}</td>
-                            <td className="px-3 py-2 text-right font-medium text-foreground">{money(q.quoteTotal)}</td>
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Difference</span>
+                        <div
+                          className={`mt-1 flex items-center gap-1 font-bold font-mono text-xl ${isHigher ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}
+                        >
+                          {isHigher ? (
+                            <TrendingUp className="size-4 inline" />
+                          ) : (
+                            <TrendingDown className="size-4 inline" />
+                          )}
+                          {isHigher ? `+${money(Math.abs(diff))}` : `-${money(Math.abs(diff))}`}
+                        </div>
+                        <span
+                          className={`text-[11px] font-medium ${isHigher ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}
+                        >
+                          {isHigher ? `+${diffPct}%` : `-${Math.abs(Number(diffPct))}%`} vs last
+                          quote
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Table of Earlier Quotes */}
+                    <div className="overflow-x-auto rounded border border-border">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-muted/60 text-muted-foreground border-b border-border">
+                          <tr>
+                            <th className="px-3 py-2.5 font-medium">Quote</th>
+                            <th className="px-3 py-2.5 font-medium">Date</th>
+                            <th className="px-3 py-2.5 font-medium">Status</th>
+                            <th className="px-3 py-2.5 font-medium">Rev</th>
+                            <th className="px-3 py-2.5 font-medium text-right">Qty</th>
+                            <th className="px-3 py-2.5 font-medium text-right">Sq. in</th>
+                            <th className="px-3 py-2.5 font-medium text-right">Price / SI</th>
+                            <th className="px-3 py-2.5 font-medium text-right">Unit price</th>
+                            <th className="px-3 py-2.5 font-medium text-right">Line total</th>
+                            <th className="px-3 py-2.5 font-medium text-right">Quote total</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-border bg-card font-mono">
+                          {quotesList.map((q, qIdx) => (
+                            <tr key={q.id || qIdx} className="hover:bg-muted/40 transition-colors">
+                              <td className="px-3 py-2 font-semibold text-foreground">
+                                {q.quoteName}
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground">{q.date}</td>
+                              <td className="px-3 py-2 font-sans">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] font-semibold text-muted-foreground border-[#374151]"
+                                >
+                                  {q.status}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground">{q.revision}</td>
+                              <td className="px-3 py-2 text-right text-foreground">{q.quantity}</td>
+                              <td className="px-3 py-2 text-right text-foreground">
+                                {q.areaSqIn || 0}
+                              </td>
+                              <td className="px-3 py-2 text-right text-foreground">
+                                {money(q.pricePerSi)}
+                              </td>
+                              <td className="px-3 py-2 text-right font-bold text-foreground">
+                                {money(q.unitPrice)}
+                              </td>
+                              <td className="px-3 py-2 text-right text-foreground">
+                                {money(q.lineTotal)}
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium text-foreground">
+                                {money(q.quoteTotal)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              },
+            )}
           </div>
 
           <DialogFooter className="mt-6 flex items-center justify-between sm:justify-between">

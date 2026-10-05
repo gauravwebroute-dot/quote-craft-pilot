@@ -112,6 +112,11 @@ router.post('/quotes/terminal-action', async (req, res) => {
       return res.status(400).json({ error: 'MISSING_IDENTIFIER', message: 'quoteId or draftSequenceId required.' });
     }
 
+    const validActions = ['ODOO_SYNC', 'EXCEL_EXPORT', 'CROSS_CHECK'];
+    if (!validActions.includes(action)) {
+      return res.status(400).json({ error: 'INVALID_ACTION', message: `action must be one of ${validActions.join(', ')}.` });
+    }
+
     let status = 'DRAFT';
     if (action === 'ODOO_SYNC') {
       status = 'SYNCED';

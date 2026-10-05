@@ -45,7 +45,9 @@ export function DuplicateDrawingDialog({
         <DialogHeader className="space-y-3 pr-6 text-left">
           <div className="flex items-center gap-2 text-amber-600">
             <AlertTriangle className="size-5 shrink-0" />
-            <DialogTitle className="text-lg font-bold leading-snug">Duplicate Drawing Detected</DialogTitle>
+            <DialogTitle className="text-lg font-bold leading-snug">
+              Duplicate Drawing Detected
+            </DialogTitle>
           </div>
           <DialogDescription className="text-sm leading-relaxed text-foreground">
             This PDF document has already been processed.
@@ -54,9 +56,13 @@ export function DuplicateDrawingDialog({
 
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm">
           <dt className="text-muted-foreground">Quote</dt>
-          <dd className="min-w-0 break-words font-mono font-semibold">{data?.quoteNumber || "QP26-0001"}</dd>
+          <dd className="min-w-0 break-words font-mono font-semibold">
+            {data?.quoteNumber || "QP26-0001"}
+          </dd>
           <dt className="text-muted-foreground">Customer</dt>
-          <dd className="min-w-0 break-words font-semibold">{data?.customerName || "ABC Metal Works"}</dd>
+          <dd className="min-w-0 break-words font-semibold">
+            {data?.customerName || "ABC Metal Works"}
+          </dd>
         </dl>
 
         <p className="text-sm font-medium text-foreground">Select how you would like to proceed:</p>

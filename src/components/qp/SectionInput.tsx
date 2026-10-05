@@ -120,7 +120,11 @@ export function SectionInput({
   businessUnit = "OC Custom Coating",
   onBusinessUnitChange,
 }: {
-  onRun: (extraction: ExtractionResult, files: File[], duplicateAction?: "revision" | "new" | null) => void;
+  onRun: (
+    extraction: ExtractionResult,
+    files: File[],
+    duplicateAction?: "revision" | "new" | null,
+  ) => void;
   currentDraftId?: string;
   businessUnit?: string;
   onBusinessUnitChange?: (bu: string) => void;
@@ -139,7 +143,9 @@ export function SectionInput({
   // Duplicate Warning Modal State (REQ-003, REQ-004)
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [duplicateData, setDuplicateData] = useState<DuplicateInfo | null>(null);
-  const [pendingExtractionPayload, setPendingExtractionPayload] = useState<ExtractionResult | null>(null);
+  const [pendingExtractionPayload, setPendingExtractionPayload] = useState<ExtractionResult | null>(
+    null,
+  );
 
   // Fetch dynamic models from OpenRouter endpoint on mount
   useEffect(() => {
@@ -150,8 +156,7 @@ export function SectionInput({
         const apiUrl = (
           import.meta.env["VITE_EXTRACTION_API_URL"] ||
           (typeof window !== "undefined" &&
-          (window.location.hostname === "localhost" ||
-            window.location.hostname === "127.0.0.1")
+          (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
             ? "http://localhost:4000"
             : "https://quote-craft-pilot.onrender.com")
         ).replace(/\/$/, "");
@@ -163,7 +168,8 @@ export function SectionInput({
             setModels(data.models);
             const exists = data.models.some((m: ModelOption) => m.id === selectedModel);
             if (!exists) {
-              const def = data.models.find((m: ModelOption) => m.isDefault)?.id || data.models[0].id;
+              const def =
+                data.models.find((m: ModelOption) => m.isDefault)?.id || data.models[0].id;
               setSelectedModel(def);
             }
           }
@@ -184,6 +190,7 @@ export function SectionInput({
   const computePdfHash = async (files: File[]) => {
     if (!files.length) return null;
     const file = files[0];
+    if (!file) return null;
     const buffer = await file.arrayBuffer();
     const digest = await crypto.subtle.digest("SHA-256", buffer);
     return Array.from(new Uint8Array(digest))
@@ -216,7 +223,11 @@ export function SectionInput({
           const res = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pdfHash: hash, sourceFile: newFiles[0]?.name, businessUnit: selectedBU }),
+            body: JSON.stringify({
+              pdfHash: hash,
+              sourceFile: newFiles[0]?.name,
+              businessUnit: selectedBU,
+            }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -252,8 +263,7 @@ export function SectionInput({
       const apiUrl = (
         import.meta.env["VITE_EXTRACTION_API_URL"] ||
         (typeof window !== "undefined" &&
-        (window.location.hostname === "localhost" ||
-          window.location.hostname === "127.0.0.1")
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
           ? "http://localhost:4000"
           : "https://quote-craft-pilot.onrender.com")
       ).replace(/\/$/, "");
@@ -283,8 +293,14 @@ export function SectionInput({
         const duplicatePayload = await duplicateResponse.json();
         if (duplicatePayload.duplicate) {
           setDuplicateData({
-            quoteNumber: duplicatePayload.quoteNumber || duplicatePayload.quote?.draftSequenceId || "QP26-0001",
-            customerName: duplicatePayload.customerName || duplicatePayload.quote?.customerName || "ABC Metal Works",
+            quoteNumber:
+              duplicatePayload.quoteNumber ||
+              duplicatePayload.quote?.draftSequenceId ||
+              "QP26-0001",
+            customerName:
+              duplicatePayload.customerName ||
+              duplicatePayload.quote?.customerName ||
+              "ABC Metal Works",
             quoteId: duplicatePayload.quote?.id,
             revisionCount: duplicatePayload.quote?.revisionCount || 1,
           });
@@ -572,11 +588,7 @@ export function SectionInput({
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              size="lg"
-              disabled={isExtracting}
-              onClick={() => executeExtraction(false)}
-            >
+            <Button size="lg" disabled={isExtracting} onClick={() => executeExtraction(false)}>
               {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
             </Button>
           </div>
