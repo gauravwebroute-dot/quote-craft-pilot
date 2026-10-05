@@ -456,7 +456,7 @@ export function SectionOdoo({
       </div>
 
       {/* Granular Sub-Step Indicators (REQ-007, Section 6.1) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3">
         <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-sm">1. Client Verification</span>
@@ -464,26 +464,6 @@ export function SectionOdoo({
           </div>
           <p className="text-xs text-muted-foreground mt-1">
             {crossCheck?.subChecks?.clientVerification?.message || "Validates customer in res.partner."}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-sm">2. Part Master Sync</span>
-            {getIndicatorBadge(partStatus, "Pending")}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            {crossCheck?.subChecks?.partMasterSync?.message || "Cross-references parts against Odoo catalog."}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-sm">3. Export Quotation Check</span>
-            {getIndicatorBadge(exportStatus, "Pending")}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            {crossCheck?.subChecks?.exportQuotationCheck?.message || "Validates subtotal arithmetic & tax terms."}
           </p>
         </div>
       </div>
@@ -660,43 +640,7 @@ export function SectionOdoo({
                       </div>
                     )}
 
-                    {canAddToOdoo && !alreadyCreated ? (
-                      <div className="mt-3">
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={creatingPart === part.partNumber || !allConflictsResolved}
-                              className="border-[#374151] text-xs h-8"
-                            >
-                              <PlusCircle className="size-3.5 mr-1" />
-                              {creatingPart === part.partNumber ? "Adding..." : "Add to Odoo"}
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Add quote line to Odoo?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will create a new quotation in Odoo for{" "}
-                                <strong>{part.partNumber}</strong> at{" "}
-                                <strong>{money(part.computedPrice?.pricePerUnit)}</strong>/unit under{" "}
-                                <strong>{businessUnit}</strong>.
-                                {crossCheck.customer?.matched
-                                  ? " The existing partner record will be linked."
-                                  : " A new customer partner record will also be created."}
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => confirmAddToOdoo(part)}>
-                                Confirm
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    ) : null}
+                    
 
                     {alreadyCreated ? (
                       <Alert className="mt-3 border-[#1B4332]/30 bg-[#1B4332]/10">

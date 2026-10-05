@@ -270,14 +270,6 @@ export function TreeMenu({
                 <User className="size-3 shrink-0" />
                 <span>Client Verification</span>
               </div>
-              <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[#f5d76e] font-medium">
-                <Box className="size-3 shrink-0" />
-                <span>Part Master Sync</span>
-              </div>
-              <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[#f5d76e] font-medium">
-                <ArrowUpRight className="size-3 shrink-0" />
-                <span>Export Quotation</span>
-              </div>
             </div>
           )}
         </div>
