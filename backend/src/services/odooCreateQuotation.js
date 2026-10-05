@@ -20,13 +20,6 @@ import { crossCheckOdoo, odooAuth, odooCall, isLiveConfigured, resolveTestCompan
  * claims a part is new - this function trusts its own fresh check, never
  * the caller's claim, as defense against a frontend bug or a stale UI
  * state pushing a duplicate through.
- *
- * TEST-PHASE SCOPING: every live write is forced under the
- * TEST_COMPANY_NAME company (currently "OC Custom Coating") and tagged
- * with TEST_TAG_NAME (currently "+temp test") - both hardcoded here, not
- * left to whatever the caller passes in, so nothing this file creates can
- * accidentally land under other companies while this is still being
- * validated.
  * ============================================================================
  */
 
@@ -36,6 +29,7 @@ import { crossCheckOdoo, odooAuth, odooCall, isLiveConfigured, resolveTestCompan
  * @param {Array<object>} params.parts - extracted part objects (same shape
  *   used by /api/odoo/cross-check and the pricing engine)
  * @param {object} [params.formPayload] - complete form state JSON for bidirectional rehydration (REQ-006)
+ * @param {string} [params.businessUnit] - Target company / Business Unit
  * @param {boolean} params.confirm - MUST be exactly `true`. This is the
  *   caller's explicit "yes, write this" signal.
  */

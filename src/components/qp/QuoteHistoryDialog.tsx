@@ -175,10 +175,11 @@ export function QuoteHistoryDialog({
     }
   };
 
-  const handleDelete = async (quoteId: number) => {
+  const handleDelete = async (quoteId: number, businessUnit?: string) => {
     if (!confirm("Are you sure you want to delete this quote record?")) return;
     try {
-      const response = await fetch(`${apiUrl()}/api/quotes/${quoteId}`, {
+      const buQuery = businessUnit ? `?businessUnit=${encodeURIComponent(businessUnit)}` : "";
+      const response = await fetch(`${apiUrl()}/api/quotes/${quoteId}${buQuery}`, {
         method: "DELETE",
       });
       if (response.ok) {
@@ -375,7 +376,7 @@ export function QuoteHistoryDialog({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(quote.id)}
+                            onClick={() => handleDelete(quote.id, quote.businessUnit)}
                             className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10"
                             title="Delete Quote"
                           >

@@ -85,6 +85,8 @@ export function saveLocalQuote(quote: Partial<StoredQuoteItem> & { draftSequence
     formPayload: quote.formPayload || (existingIdx >= 0 ? quotes[existingIdx].formPayload : undefined),
   };
 
+  const previousStatus = existingIdx >= 0 ? (quotes[existingIdx]?.status ?? null) : null;
+
   if (existingIdx >= 0) {
     quotes[existingIdx] = fullRecord;
   } else {
@@ -94,7 +96,7 @@ export function saveLocalQuote(quote: Partial<StoredQuoteItem> & { draftSequence
   localStorage.setItem(STORAGE_KEY_QUOTES, JSON.stringify(quotes));
 
   // Advance sequence counter if this was synced or exported
-  if (fullRecord.status === "SYNCED" || fullRecord.status === "EXCEL_EXPORTED") {
+  if ((fullRecord.status === "SYNCED" || fullRecord.status === "EXCEL_EXPORTED") && previousStatus !== fullRecord.status) {
     advanceLocalSequence();
   }
 

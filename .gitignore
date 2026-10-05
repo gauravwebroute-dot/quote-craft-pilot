@@ -43,3 +43,11 @@ backend/*.pdf
 *.njsproj
 *.sln
 *.sw?
+
+# Local secrets
+.env
+backend/.env
+
+# Local SQLite fallback database and its journal files
+backend/data/*.sqlite-shm
+backend/data/*.sqlite-wal

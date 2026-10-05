@@ -7,13 +7,6 @@ import { DEFAULT_RATE_CARD } from "../config/rateCard.js";
  * odooCreateQuotation.js, a SEPARATE file) `create`. Keeping duplicate-check
  * strictly read-only means running it can never damage existing Odoo data,
  * no matter how many times or how it's called.
- *
- * TEST-PHASE SAFETY: while we're validating the RFQ -> Odoo pipeline, ALL
- * live reads and writes are scoped to a single company - "MAD Custom-
- * Coating" - never Maverick or OC. This is enforced here in code (see
- * resolveTestCompanyId + the JS-side company filter below), not left as a
- * "please remember to only test on MAD" convention - a convention can be
- * forgotten, a filter in code can't.
  */
 
 export const TEST_COMPANY_NAME = "OC Custom Coating";

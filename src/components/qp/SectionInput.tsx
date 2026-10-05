@@ -12,15 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles, AlertTriangle, CopyCheck, PlusSquare } from "lucide-react";
+import { DuplicateDrawingDialog } from "./DuplicateDrawingDialog";
+import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles } from "lucide-react";
 
 const emailBody = `Hi,
 Could we please get pricing for the attached items? The qty will be 6 each.
@@ -223,7 +216,7 @@ export function SectionInput({
           const res = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pdfHash: hash, sourceFile: newFiles[0]?.name }),
+            body: JSON.stringify({ pdfHash: hash, sourceFile: newFiles[0]?.name, businessUnit: selectedBU }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -281,6 +274,7 @@ export function SectionInput({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             pdfHash,
+            businessUnit: selectedBU,
             sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
             customer: payload.extraction.customer,
             parts: payload.extraction.parts,
@@ -590,54 +584,14 @@ export function SectionInput({
       </Card>
 
       {/* Duplicate Warning Modal (REQ-004, Section 4.2) */}
-      <Dialog open={duplicateModalOpen} onOpenChange={setDuplicateModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="size-5" />
-              <DialogTitle className="text-lg font-bold">Duplicate Drawing Detected</DialogTitle>
-            </div>
-            <DialogDescription className="pt-2 text-foreground font-medium text-sm">
-              This PDF document has already been processed under Quote #{duplicateData?.quoteNumber || "QP26-0001"} (Customer: {duplicateData?.customerName || "ABC Metal Works"}). Select how you would like to proceed:
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-3 py-3">
-            <Button
-              variant="default"
-              onClick={handleModalCreateRevision}
-              className="justify-start gap-2 h-auto py-2.5 bg-[#1B4332] text-white hover:bg-[#1B4332]/90"
-            >
-              <CopyCheck className="size-4 shrink-0" />
-              <div className="text-left">
-                <div className="font-semibold text-sm">Create Revision (v{(duplicateData?.revisionCount || 1) + 1})</div>
-                <div className="text-xs opacity-90">Links current session to existing quote parent, incrementing revision tag.</div>
-              </div>
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={handleModalCreateNewQuote}
-              className="justify-start gap-2 h-auto py-2.5 border-[#374151]"
-            >
-              <PlusSquare className="size-4 shrink-0 text-primary" />
-              <div className="text-left">
-                <div className="font-semibold text-sm">Create New Quote</div>
-                <div className="text-xs text-muted-foreground">Bypasses duplicate linking, assigns next available sequence ID.</div>
-              </div>
-            </Button>
-
-            <Button
-              variant="ghost"
-              onClick={handleModalCancel}
-              className="justify-start gap-2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-4 shrink-0" />
-              <span>Cancel (Abort upload)</span>
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DuplicateDrawingDialog
+        open={duplicateModalOpen}
+        onOpenChange={setDuplicateModalOpen}
+        data={duplicateData}
+        onCreateRevision={handleModalCreateRevision}
+        onCreateNewQuote={handleModalCreateNewQuote}
+        onCancel={handleModalCancel}
+      />
     </div>
   );
 }
