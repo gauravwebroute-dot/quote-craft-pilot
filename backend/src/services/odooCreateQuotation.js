@@ -161,7 +161,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
     const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
     const rev = p.original?.revision || "";
-    const description = `${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
+    const description = `${partLabel(p)}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.40);
@@ -188,7 +188,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
     const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
     const rev = p.original?.revision || "";
-    const description = `${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
+    const description = `${partLabel(p)}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.40);
@@ -273,6 +273,17 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
   auditLog("LIVE_CREATE", customer, created, skipped);
 
   return { mode: "live", created, skipped, message: `Quotation created in Odoo under "${businessUnit}", tagged "${TEST_TAG_NAME}".` };
+}
+
+/**
+ * Text for the start of a quote line. Includes the part NUMBER (not only the name) so
+ * a later cross-check can recognise the same part on this customer's earlier quotes.
+ */
+function partLabel(p) {
+  const num = String(p.partNumber ?? p.original?.partNumber ?? "").trim();
+  const name = String(p.original?.partName ?? "").trim();
+  if (num && name && !name.toLowerCase().includes(num.toLowerCase())) return `${num} - ${name}`;
+  return name || num || "Part";
 }
 
 function auditLog(kind, customer, created, skipped) {

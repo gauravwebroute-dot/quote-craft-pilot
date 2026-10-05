@@ -44,6 +44,7 @@ type PartCrossCheck = {
   reason: "NEW_CUSTOMER" | "EXISTING_QUOTE_FOUND" | "NO_PRIOR_QUOTE_FOR_THIS_PART";
   previousQuote: { pricePerUnit?: number; revision?: string | null; quotedAt?: string; saleOrderName?: string } | null;
   priceHistory?: PriceHistoryEntry[];
+  lookupNote?: string | null;
   computedPrice: {
     pricePerUnit?: number;
     totalLineItem?: number;
@@ -424,7 +425,7 @@ export function SectionOdoo({
             </AlertDialog>
           )}
 
-          {crossCheck?.parts?.some((p) => (p.priceHistory?.length ?? 0) > 0) && (
+          {crossCheck?.customer?.matched && (
             <Button
               variant="outline"
               onClick={() => setShowPriceHistory(true)}
@@ -639,6 +640,10 @@ export function SectionOdoo({
                         </strong>
                       </span>
                     </div>
+
+                    {part.lookupNote && !part.previousQuote ? (
+                      <p className="mt-2 text-xs text-muted-foreground">{part.lookupNote}</p>
+                    ) : null}
 
                     {canAddToOdoo && !alreadyCreated ? (
                       <div className="mt-3">

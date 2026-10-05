@@ -184,8 +184,11 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = TEST_COMPANY
   for (const part of parts) {
     let previousQuote = null;
     let priceHistory = [];
+    let lookupNote = null;
     if (partner && part.partNumber) {
-      priceHistory = await fetchPriceHistory(uid, partner.id, companyId, part.partNumber);
+      const lookup = await fetchPriceHistory(uid, partner, companyId, part);
+      priceHistory = lookup.history;
+      lookupNote = lookup.note;
       if (priceHistory.length > 0) {
         const latest = priceHistory[0];
         previousQuote = {
@@ -209,7 +212,7 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = TEST_COMPANY
         }
       }
     }
-    results.push(buildPartResult(part, partner, previousQuote, priceHistory));
+    results.push(buildPartResult(part, partner, previousQuote, priceHistory, lookupNote));
   }
 
   const subChecks = {
@@ -265,17 +268,47 @@ async function getLineFields(uid) {
 }
 
 /**
- * Every earlier (non-cancelled) quote line for this customer + part number,
- * newest first, with the quote-level context (date, status, quote total,
- * currency) so the UI can show exactly what was quoted before. Read-only.
+ * Every earlier (non-cancelled) quote line for this customer + part, newest first,
+ * with the quote-level context (date, status, quote total, currency). Read-only.
+ *
+ * How a line is recognised as "this part" - quotes reach Odoo in two shapes and
+ * neither reliably has the part number in the line text:
+ *   - CSV import: the part number is the line's PRODUCT; the description is free text.
+ *   - Created by this app: the description starts with the part NAME.
+ * so we match on the line text, the product name / internal reference, and (for
+ * longer, specific names only) the part name. Each hit records how it matched.
+ *
+ * Company scoping: the API user's default company may differ from the target one,
+ * and Odoo then hides the other company's quotes WITHOUT an error. The target
+ * company is therefore passed explicitly in the request context.
  */
-async function fetchPriceHistory(uid, partnerId, companyId, partNumber) {
+async function fetchPriceHistory(uid, partner, companyId, part) {
+  const partNumber = String(part.partNumber ?? "").trim();
+  const partName = String(part.partName ?? "").trim().slice(0, 80);
+  const useName = partName.length >= 12 && partName.toLowerCase() !== partNumber.toLowerCase();
+  const context = { allowed_company_ids: [companyId] };
+
   const available = await getLineFields(uid);
   const wanted = [
-    "id", "name", "price_unit", "product_uom_qty", "price_subtotal", "order_id", "create_date",
+    "id", "name", "price_unit", "product_uom_qty", "price_subtotal", "order_id", "product_id", "create_date",
     "x_rev", "x_sq_in_per_unit", "x_price_per_si", "x_work_type",
   ];
-  const fields = wanted.filter((f) => available.has(f));
+  const fields = wanted.filter((f) => available.has(f) || f === "product_id");
+
+  const partTerms = [
+    ["name", "ilike", partNumber],
+    ["product_id.name", "ilike", partNumber],
+    ["product_id.default_code", "ilike", partNumber],
+  ];
+  if (useName) partTerms.push(["name", "ilike", partName]);
+  const orTerms = partTerms.flatMap((t, i) => (i < partTerms.length - 1 ? ["|", t] : [t]));
+
+  const customerIds = partner.relatedIds?.length ? partner.relatedIds : [partner.id];
+  const baseDomain = [
+    ["order_id.company_id", "=", companyId],
+    ["order_id.state", "!=", "cancel"],
+    ...orTerms,
+  ];
 
   const lines = await odooCall("object", "execute_kw", [
     process.env.ODOO_DB,
@@ -283,15 +316,35 @@ async function fetchPriceHistory(uid, partnerId, companyId, partNumber) {
     process.env.ODOO_API_KEY,
     "sale.order.line",
     "search_read",
-    [[
-      ["order_id.partner_id", "=", partnerId],
-      ["order_id.company_id", "=", companyId],
-      ["order_id.state", "!=", "cancel"],
-      ["name", "ilike", partNumber],
-    ]],
-    { fields, limit: PRICE_HISTORY_LIMIT, order: "create_date desc, id desc" },
+    [[["order_id.partner_id", "child_of", customerIds], ...baseDomain]],
+    { fields, limit: PRICE_HISTORY_LIMIT, order: "create_date desc, id desc", context },
   ]);
-  if (!lines.length) return [];
+
+  if (!lines.length) {
+    // Say WHY nothing was found instead of silently showing "none".
+    let elsewhere = 0;
+    try {
+      elsewhere = await odooCall("object", "execute_kw", [
+        process.env.ODOO_DB,
+        uid,
+        process.env.ODOO_API_KEY,
+        "sale.order.line",
+        "search_count",
+        [baseDomain],
+        { context },
+      ]);
+    } catch {
+      elsewhere = 0;
+    }
+    const records = customerIds.length;
+    const note =
+      `Searched ${records} customer record${records === 1 ? "" : "s"} for "${partner.name}" in this company; ` +
+      `no earlier quote line matched part ${partNumber}.` +
+      (elsewhere > 0
+        ? ` This part appears on ${elsewhere} quote line${elsewhere === 1 ? "" : "s"} for other customers - the earlier quote may be under a different customer name.`
+        : "");
+    return { history: [], note };
+  }
 
   const orderIds = [...new Set(lines.map((l) => l.order_id?.[0]).filter(Boolean))];
   const orders = orderIds.length
@@ -302,18 +355,18 @@ async function fetchPriceHistory(uid, partnerId, companyId, partNumber) {
         "sale.order",
         "search_read",
         [[["id", "in", orderIds]]],
-        {
-          fields: ["id", "name", "date_order", "state", "amount_total", "currency_id"],
-          context: { allowed_company_ids: [companyId] },
-        },
+        { fields: ["id", "name", "date_order", "state", "amount_total", "currency_id"], context },
       ])
     : [];
   const orderById = new Map(orders.map((o) => [o.id, o]));
+  const pn = partNumber.toLowerCase();
 
-  return lines.map((line) => {
+  const history = lines.map((line) => {
     const order = orderById.get(line.order_id?.[0]) ?? {};
     const qty = Number(line.product_uom_qty ?? 0);
     const unit = Number(line.price_unit ?? 0);
+    const productName = String(line.product_id?.[1] ?? "").toLowerCase();
+    const byNumber = String(line.name ?? "").toLowerCase().includes(pn) || productName.includes(pn);
     return {
       saleOrderId: line.order_id?.[0] ?? null,
       saleOrderName: line.order_id?.[1] ?? order.name ?? null,
@@ -329,8 +382,10 @@ async function fetchPriceHistory(uid, partnerId, companyId, partNumber) {
       workType: line.x_work_type || null,
       orderTotal: typeof order.amount_total === "number" ? order.amount_total : null,
       currency: order.currency_id?.[1] ?? null,
+      matchedBy: byNumber ? "part number" : "part name",
     };
   });
+  return { history, note: null };
 }
 
 async function resolveTestCompanyId(uid, companyName = null) {
@@ -396,10 +451,21 @@ async function findLivePartner(uid, customer, companyId) {
     "res.partner",
     "search_read",
     [domain.length > 1 ? ["|", ...domain] : domain],
-    { fields: ["id", "name", "email", "phone", "company_id"], limit: 20 },
+    { fields: ["id", "name", "email", "phone", "company_id"], limit: 20, context: { allowed_company_ids: [companyId] } },
   ]);
 
-  return partners.find((p) => !p.company_id || p.company_id[0] === companyId) ?? null;
+  const usable = partners.filter((p) => !p.company_id || p.company_id[0] === companyId);
+  const chosen = usable[0] ?? null;
+  if (!chosen) return null;
+
+  // The same customer is often stored more than once in Odoo (e.g. two "ABC Company"
+  // records). Earlier quotes may sit on any of them, so remember every record that is
+  // the same customer (same name or same email) and search quotes across all of them.
+  const sameName = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+  const relatedIds = usable
+    .filter((p) => p.id === chosen.id || sameName(p.name, chosen.name) || (chosen.email && p.email === chosen.email))
+    .map((p) => p.id);
+  return { ...chosen, relatedIds };
 }
 
 /**
@@ -473,7 +539,7 @@ function buildExportQuotationCheck(results, parts) {
   };
 }
 
-function buildPartResult(part, matchedCustomer, previousQuote, priceHistory = []) {
+function buildPartResult(part, matchedCustomer, previousQuote, priceHistory = [], lookupNote = null) {
   const reason = !matchedCustomer
     ? "NEW_CUSTOMER"
     : previousQuote
@@ -492,6 +558,7 @@ function buildPartResult(part, matchedCustomer, previousQuote, priceHistory = []
     reason,
     previousQuote,
     priceHistory,
+    lookupNote,
     computedPrice,
   };
 }

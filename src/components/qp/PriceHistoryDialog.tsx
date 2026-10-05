@@ -33,12 +33,14 @@ export type PriceHistoryEntry = {
   workType?: string | null;
   orderTotal?: number | null;
   currency?: string | null;
+  matchedBy?: "part number" | "part name" | string | null;
 };
 
 export type PriceHistoryPart = {
   partNumber: string | null;
   revision: string | null;
   priceHistory?: PriceHistoryEntry[];
+  lookupNote?: string | null;
   computedPrice: { pricePerUnit?: number; totalLineItem?: number; priced?: boolean; reason?: string };
 };
 
@@ -84,11 +86,33 @@ export function PriceHistoryDialog({
             Existing customer — price history found
           </DialogTitle>
           <DialogDescription>
-            <strong>{customerName}</strong> has already been quoted for{" "}
-            {withHistory.length} of the parts in this RFQ under <strong>{businessUnit}</strong>. Compare
-            the earlier prices below with the newly calculated price before you send this quote.
+            {withHistory.length > 0 ? (
+              <>
+                <strong>{customerName}</strong> has already been quoted for {withHistory.length} of the parts
+                in this RFQ under <strong>{businessUnit}</strong>. Compare the earlier prices below with the
+                newly calculated price before you send this quote.
+              </>
+            ) : (
+              <>
+                No earlier quotes were found for the parts in this RFQ under <strong>{customerName}</strong> in{" "}
+                <strong>{businessUnit}</strong>.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
+
+        {withHistory.length === 0 ? (
+          <div className="space-y-2 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm">
+            {parts.map((part, index) => (
+              <div key={`${part.partNumber}-${index}`}>
+                <span className="font-mono font-semibold">{part.partNumber || "Unknown part"}</span>
+                <p className="text-xs text-muted-foreground">
+                  {part.lookupNote || "No earlier quote line matched this part number."}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div className="space-y-5">
           {withHistory.map((part, index) => {
@@ -180,7 +204,12 @@ export function PriceHistoryDialog({
                     <TableBody>
                       {history.map((h, i) => (
                         <TableRow key={`${h.saleOrderId ?? "q"}-${i}`}>
-                          <TableCell className="font-mono text-xs">{h.saleOrderName || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {h.saleOrderName || "—"}
+                            {h.matchedBy === "part name" ? (
+                              <div className="font-sans text-[10px] font-normal text-muted-foreground">matched by part name</div>
+                            ) : null}
+                          </TableCell>
                           <TableCell className="text-xs">{formatDate(h.quotedAt)}</TableCell>
                           <TableCell className="text-xs">{h.stateLabel || "—"}</TableCell>
                           <TableCell className="text-xs">{h.revision || "—"}</TableCell>
