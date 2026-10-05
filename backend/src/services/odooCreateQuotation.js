@@ -39,7 +39,7 @@ import { crossCheckOdoo, odooAuth, odooCall, isLiveConfigured, resolveTestCompan
  * @param {boolean} params.confirm - MUST be exactly `true`. This is the
  *   caller's explicit "yes, write this" signal.
  */
-export async function createOdooQuotation({ customer = {}, parts = [], formPayload = null, confirm }) {
+export async function createOdooQuotation({ customer = {}, parts = [], formPayload = null, businessUnit = "", confirm }) {
   if (confirm !== true) {
     throw new SafetyError("Refusing to write to Odoo: `confirm` must be exactly `true`.");
   }
@@ -47,8 +47,10 @@ export async function createOdooQuotation({ customer = {}, parts = [], formPaylo
     throw new SafetyError("No parts provided to create a quotation for.");
   }
 
-  // Always re-run the duplicate check ourselves, right now, server-side.
-  const freshCheck = await crossCheckOdoo({ customer, parts });
+  const targetBu = businessUnit || formPayload?.businessUnit || TEST_COMPANY_NAME;
+
+  // Always re-run the duplicate check ourselves, right now, server-side with the target company.
+  const freshCheck = await crossCheckOdoo({ customer, parts, businessUnit: targetBu });
 
   const toCreate = [];
   const skipped = [];
@@ -75,22 +77,23 @@ export async function createOdooQuotation({ customer = {}, parts = [], formPaylo
   }
 
   if (!isLiveConfigured()) {
-    return createDummyQuotation({ customer, toCreate, skipped, formPayload });
+    return createDummyQuotation({ customer, toCreate, skipped, formPayload, businessUnit: targetBu });
   }
 
-  return createLiveQuotation({ customer, freshCheck, toCreate, skipped, formPayload });
+  return createLiveQuotation({ customer, freshCheck, toCreate, skipped, formPayload, businessUnit: targetBu });
 }
 
-function createDummyQuotation({ customer, toCreate, skipped, formPayload }) {
+function createDummyQuotation({ customer, toCreate, skipped, formPayload, businessUnit }) {
   const fakeOrderNum = Math.floor(Math.random() * 900) + 42;
   const saleOrderName = `S000${fakeOrderNum}`.slice(0, 6);
   const fakeOrderId = 1000 + fakeOrderNum;
+  const companyName = businessUnit || TEST_COMPANY_NAME;
   const result = {
     mode: "dummy",
     created: {
       saleOrderId: fakeOrderId,
       saleOrderName,
-      company: TEST_COMPANY_NAME,
+      company: companyName,
       tag: TEST_TAG_NAME,
       partnerCreated: false,
       lineCount: toCreate.length,
@@ -104,15 +107,16 @@ function createDummyQuotation({ customer, toCreate, skipped, formPayload }) {
       }),
     },
     skipped,
-    message: `Dummy mode - simulated Odoo quotation created as ${saleOrderName}. Configure ODOO_URL/ODOO_DB/ODOO_USERNAME/ODOO_API_KEY to test live.`,
+    message: `Dummy mode - simulated Odoo quotation created as ${saleOrderName} under ${companyName}. Configure ODOO_URL/ODOO_DB/ODOO_USERNAME/ODOO_API_KEY to test live.`,
   };
   auditLog("DUMMY_CREATE", customer, result.created, skipped);
   return result;
 }
 
-async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, formPayload }) {
+async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, formPayload, businessUnit }) {
   const uid = await odooAuth();
-  const companyId = await resolveTestCompanyId(uid);
+  const companyId = freshCheck.company?.id || (await resolveTestCompanyId(uid, businessUnit));
+  const companyName = freshCheck.company?.name || businessUnit || TEST_COMPANY_NAME;
   const tagId = await resolveTestTagId(uid);
 
   let partnerId = freshCheck.customer?.record?.id ?? null;
@@ -139,7 +143,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
   // Rich notes summarizing every extracted detail (minor to major) for full visibility in Odoo
   const noteSummary = [
     `=== QuotePilot Complete RFQ Data [${draftRef}] ===`,
-    `Customer: ${customer.company || customer.email || "Standard Customer"} | BU: ${TEST_COMPANY_NAME}`,
+    `Customer: ${customer.company || customer.email || "Standard Customer"} | BU: ${companyName}`,
     `Extracted Line Items (${toCreate.length}):`,
     ...toCreate.map((p, idx) => {
       const orig = p.original || {};
@@ -259,7 +263,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     saleOrderId,
     saleOrderName: createdOrder?.name ?? `S${String(saleOrderId).padStart(5, "0")}`,
     clientOrderRef: createdOrder?.client_order_ref ?? draftRef,
-    company: TEST_COMPANY_NAME,
+    company: companyName,
     tag: TEST_TAG_NAME,
     partnerId,
     partnerCreated,
@@ -269,7 +273,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
 
   auditLog("LIVE_CREATE", customer, created, skipped);
 
-  return { mode: "live", created, skipped, message: `Quotation created in Odoo under "${TEST_COMPANY_NAME}", tagged "${TEST_TAG_NAME}".` };
+  return { mode: "live", created, skipped, message: `Quotation created in Odoo under "${companyName}", tagged "${TEST_TAG_NAME}".` };
 }
 
 function auditLog(kind, customer, created, skipped) {

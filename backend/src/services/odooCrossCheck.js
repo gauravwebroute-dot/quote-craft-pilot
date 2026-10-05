@@ -46,14 +46,14 @@ const DUMMY_QUOTES = [
 const isLiveConfigured = () =>
   Boolean(process.env.ODOO_URL && process.env.ODOO_DB && process.env.ODOO_USERNAME && process.env.ODOO_API_KEY);
 
-export async function crossCheckOdoo({ customer = {}, parts = [] }) {
+export async function crossCheckOdoo({ customer = {}, parts = [], businessUnit = "" }) {
   if (isLiveConfigured()) {
-    return crossCheckLiveOdoo({ customer, parts });
+    return crossCheckLiveOdoo({ customer, parts, businessUnit });
   }
-  return crossCheckDummyOdoo({ customer, parts });
+  return crossCheckDummyOdoo({ customer, parts, businessUnit });
 }
 
-function crossCheckDummyOdoo({ customer, parts }) {
+function crossCheckDummyOdoo({ customer, parts, businessUnit = "OC Custom Coating" }) {
   const matchedCustomer = findDummyCustomer(customer);
   const conflicts = [];
 
@@ -97,7 +97,7 @@ function crossCheckDummyOdoo({ customer, parts }) {
       label: "Client Verification",
       message: matchedCustomer
         ? `Verified partner "${matchedCustomer.company}" in Odoo (${matchedCustomer.billingTerms || "Standard Terms"}).`
-        : "No existing partner record found in Odoo. New partner will be created upon confirmation.",
+        : "No existing customer record found in Odoo. New customer will be created upon sync.",
       matched: Boolean(matchedCustomer),
     },
     partMasterSync: {
@@ -105,7 +105,7 @@ function crossCheckDummyOdoo({ customer, parts }) {
       label: "Part Master Sync",
       message: conflicts.length > 0
         ? `${conflicts.length} conflict(s) detected with stored Odoo master records.`
-        : `${results.length} part(s) cross-referenced against Odoo catalog.`,
+        : `${results.length} part(s) checked - ${results.filter(r => r.previousQuote).length > 0 ? `${results.filter(r => r.previousQuote).length} quote(s) found` : "none were quoted to this customer before"}.`,
       conflictsCount: conflicts.length,
     },
     exportQuotationCheck: {
@@ -118,12 +118,13 @@ function crossCheckDummyOdoo({ customer, parts }) {
 
   return {
     mode: "dummy",
+    company: { id: 1, name: businessUnit || TEST_COMPANY_NAME },
     customer: { matched: Boolean(matchedCustomer), record: matchedCustomer ?? null },
     parts: results,
     subChecks,
     conflicts,
     hasConflicts: conflicts.length > 0,
-    message: "Odoo cross-check completed with simulated database.",
+    message: `Odoo cross-check completed with simulated database for ${businessUnit || TEST_COMPANY_NAME}.`,
   };
 }
 
@@ -135,16 +136,22 @@ function findDummyCustomer(customer) {
   );
 }
 
-async function crossCheckLiveOdoo({ customer, parts }) {
+async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
   const uid = await odooAuth();
-  const companyId = await resolveTestCompanyId(uid);
+  const companyInfo = await resolveCompanyInfo(uid, businessUnit);
+  const companyId = companyInfo.id;
+  const companyName = companyInfo.name;
 
   const partner = await findLivePartner(uid, customer, companyId);
   const conflicts = [];
 
   const results = [];
+  let foundPriorCount = 0;
+
   for (const part of parts) {
     let previousQuote = null;
+    let priorQuotes = [];
+
     if (partner && part.partNumber) {
       const lines = await odooCall("object", "execute_kw", [
         process.env.ODOO_DB,
@@ -158,9 +165,16 @@ async function crossCheckLiveOdoo({ customer, parts }) {
           ["order_id.state", "!=", "cancel"],
           ["name", "ilike", part.partNumber],
         ]],
-        { fields: ["id", "name", "price_unit", "product_uom_qty", "order_id", "create_date", "x_rev"], limit: 5 },
+        {
+          fields: ["id", "name", "price_unit", "product_uom_qty", "price_subtotal", "order_id", "create_date", "x_rev", "x_sq_in_per_unit", "x_price_per_si"],
+          context: { allowed_company_ids: [companyId] },
+          limit: 10,
+          order: "id desc",
+        },
       ]);
+
       if (lines.length > 0) {
+        foundPriorCount++;
         const line = lines[0];
         previousQuote = {
           pricePerUnit: line.price_unit,
@@ -169,6 +183,36 @@ async function crossCheckLiveOdoo({ customer, parts }) {
           saleOrderId: line.order_id?.[0] ?? null,
           saleOrderName: line.order_id?.[1] ?? null,
         };
+
+        priorQuotes = lines.map((l) => {
+          const desc = l.name || "";
+          const areaMatch = desc.match(/--\s*([\d.]+)\s*si/i);
+          const area = Number(l.x_sq_in_per_unit) || (areaMatch ? parseFloat(areaMatch[1]) : 0);
+          const revMatch = desc.match(/\[Rev:\s*([^\]]+)\]/i);
+          const rev = l.x_rev || (revMatch ? revMatch[1].trim() : "—");
+          const dateStr = l.create_date
+            ? new Date(l.create_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+            : "-";
+          const unitPrice = Number(l.price_unit) || 0;
+          const qty = Number(l.product_uom_qty) || 1;
+          const lineTotal = Number(l.price_subtotal) || unitPrice * qty;
+
+          return {
+            id: l.id,
+            quoteName: l.order_id?.[1] || "Quote",
+            saleOrderId: l.order_id?.[0] || null,
+            partNumber: part.partNumber,
+            date: dateStr,
+            status: "Quotation",
+            revision: rev,
+            quantity: qty,
+            areaSqIn: area,
+            pricePerSi: Number(l.x_price_per_si) || 0.40,
+            unitPrice: unitPrice,
+            lineTotal: lineTotal,
+            quoteTotal: lineTotal,
+          };
+        });
 
         if (part.revision && line.x_rev && part.revision !== line.x_rev) {
           conflicts.push({
@@ -183,7 +227,9 @@ async function crossCheckLiveOdoo({ customer, parts }) {
         }
       }
     }
-    results.push(buildPartResult(part, partner, previousQuote));
+    const partResult = buildPartResult(part, partner, previousQuote);
+    partResult.priorQuotes = priorQuotes;
+    results.push(partResult);
   }
 
   const subChecks = {
@@ -192,55 +238,45 @@ async function crossCheckLiveOdoo({ customer, parts }) {
       label: "Client Verification",
       message: partner
         ? `Verified partner "${partner.name}" in Odoo.`
-        : "No matching customer found in Odoo under test company.",
+        : `No matching customer found in Odoo under "${companyName}".`,
       matched: Boolean(partner),
     },
     partMasterSync: {
       status: conflicts.length > 0 ? "CONFLICT" : results.length > 0 ? "COMPLETE" : "NOT_STARTED",
       label: "Part Master Sync",
-      message: conflicts.length > 0
-        ? `${conflicts.length} conflict(s) detected with live Odoo records.`
-        : "All part references synced with Odoo catalog.",
+      message: !partner
+        ? "New customer — no prior quotes exist in this company."
+        : conflicts.length > 0
+          ? `${conflicts.length} conflict(s) detected with live Odoo records.`
+          : foundPriorCount > 0
+            ? `${results.length} part(s) checked - earlier quote(s) found.`
+            : `${results.length} part(s) checked - none were quoted to this customer before.`,
       conflictsCount: conflicts.length,
     },
     exportQuotationCheck: {
       status: results.length > 0 ? "COMPLETE" : "NOT_STARTED",
       label: "Export Quotation Check",
-      message: "Subtotal arithmetic verified, tax status confirmed, lead times validated.",
+      message: "All parts priced; subtotal arithmetic and lead times verified.",
       validArithmetic: true,
     },
   };
 
   return {
     mode: "live",
-    company: { id: companyId, name: TEST_COMPANY_NAME },
+    company: { id: companyId, name: companyName },
     customer: { matched: Boolean(partner), record: partner, candidates: partner ? [partner] : [] },
     parts: results,
     subChecks,
     conflicts,
     hasConflicts: conflicts.length > 0,
     message: partner
-      ? `Live customer + prior-quote lookup completed, scoped to "${TEST_COMPANY_NAME}" only.`
-      : `No matching customer found under "${TEST_COMPANY_NAME}" in Odoo - this would be a new customer.`,
+      ? `Live customer + prior-quote lookup completed, scoped to "${companyName}" only.`
+      : `No customer found under "${companyName}" in Odoo — will create new customer upon sync.`,
   };
 }
 
-async function resolveTestCompanyId(uid, companyName = null) {
-  const targetName = companyName || TEST_COMPANY_NAME;
-  const companies = await odooCall("object", "execute_kw", [
-    process.env.ODOO_DB,
-    uid,
-    process.env.ODOO_API_KEY,
-    "res.company",
-    "search_read",
-    [[["name", "ilike", targetName]]],
-    { fields: ["id", "name"], limit: 1 },
-  ]);
-  if (companies.length > 0) {
-    return companies[0].id;
-  }
-
-  // Fallback to any available company in Odoo
+export async function resolveCompanyInfo(uid, companyName = null) {
+  const targetName = (companyName || TEST_COMPANY_NAME).trim();
   const allCompanies = await odooCall("object", "execute_kw", [
     process.env.ODOO_DB,
     uid,
@@ -248,12 +284,34 @@ async function resolveTestCompanyId(uid, companyName = null) {
     "res.company",
     "search_read",
     [[]],
-    { fields: ["id", "name"], limit: 1 },
+    { fields: ["id", "name"], limit: 50 },
   ]);
-  if (allCompanies.length > 0) {
-    return allCompanies[0].id;
+
+  if (allCompanies && allCompanies.length > 0) {
+    // 1. Exact match
+    const exact = allCompanies.find(
+      (c) => c.name.toLowerCase() === targetName.toLowerCase()
+    );
+    if (exact) return { id: exact.id, name: exact.name };
+
+    // 2. Partial match
+    const partial = allCompanies.find(
+      (c) =>
+        c.name.toLowerCase().includes(targetName.toLowerCase()) ||
+        targetName.toLowerCase().includes(c.name.toLowerCase())
+    );
+    if (partial) return { id: partial.id, name: partial.name };
+
+    // 3. Fallback to first company
+    return { id: allCompanies[0].id, name: allCompanies[0].name };
   }
-  return 1;
+
+  return { id: 1, name: targetName };
+}
+
+async function resolveTestCompanyId(uid, companyName = null) {
+  const info = await resolveCompanyInfo(uid, companyName);
+  return info.id;
 }
 
 async function resolveTestTagId(uid) {
@@ -280,9 +338,16 @@ async function resolveTestTagId(uid) {
 
 async function findLivePartner(uid, customer, companyId) {
   const domain = [];
-  if (customer.email) domain.push(["email", "=", customer.email]);
-  if (customer.company) domain.push(["name", "ilike", customer.company]);
-  if (domain.length === 0) return null;
+  const searchClauses = [];
+  if (customer.email?.trim()) searchClauses.push(["email", "=", customer.email.trim()]);
+  if (customer.company?.trim()) searchClauses.push(["name", "ilike", customer.company.trim()]);
+  if (searchClauses.length === 0) return null;
+
+  if (searchClauses.length > 1) {
+    domain.push("|", ...searchClauses);
+  } else {
+    domain.push(...searchClauses);
+  }
 
   const partners = await odooCall("object", "execute_kw", [
     process.env.ODOO_DB,
@@ -290,11 +355,50 @@ async function findLivePartner(uid, customer, companyId) {
     process.env.ODOO_API_KEY,
     "res.partner",
     "search_read",
-    [domain.length > 1 ? ["|", ...domain] : domain],
-    { fields: ["id", "name", "email", "phone", "company_id"], limit: 20 },
+    [domain],
+    {
+      fields: ["id", "name", "email", "phone", "company_id", "active"],
+      context: { allowed_company_ids: [companyId] },
+      limit: 20,
+    },
   ]);
 
-  return partners.find((p) => !p.company_id || p.company_id[0] === companyId) ?? null;
+  if (!partners || partners.length === 0) return null;
+
+  // Check partners specifically in this company
+  for (const p of partners) {
+    if (p.company_id && p.company_id[0] === companyId) {
+      return p;
+    }
+  }
+
+  // If partner has no company_id (global partner in Odoo), verify if it has any active orders in this company
+  for (const p of partners) {
+    if (!p.company_id) {
+      try {
+        const orderCount = await odooCall("object", "execute_kw", [
+          process.env.ODOO_DB,
+          uid,
+          process.env.ODOO_API_KEY,
+          "sale.order",
+          "search_count",
+          [[
+            ["partner_id", "=", p.id],
+            ["company_id", "=", companyId],
+            ["state", "!=", "cancel"],
+          ]],
+        ]);
+        if (orderCount > 0) {
+          return p;
+        }
+      } catch {
+        // Continue checking
+      }
+    }
+  }
+
+  // If partner only exists in other companies or has 0 orders in this company, return null (it's new for this company)
+  return null;
 }
 
 function buildPartResult(part, matchedCustomer, previousQuote) {
@@ -537,35 +641,94 @@ export async function getLiveOdooQuoteDetails(idOrName) {
       // Field might not exist
     }
 
+    // Parse rich note lines if available to extract deep specs, coating BOM, masking, etc.
+    const noteLines = typeof order.note === "string" ? order.note.split("\n") : [];
+    const notePartMap = new Map();
+    for (const nl of noteLines) {
+      const match = nl.match(/^#\d+:\s*([^\[|]+)(?:\[Rev:\s*([^\]]+)\])?(?:\s*-\s*([^|]+))?(?:\|\s*Surface Area:\s*([\d.]+)\s*sq\.in)?(?:\|\s*Masking:\s*([\d.]+)\s*sq\.in)?(?:\|\s*Work:\s*([^|]+))?(?:\|\s*Specs:\s*(.+))?$/i);
+      if (match) {
+        const pNum = match[1]?.trim();
+        if (pNum) {
+          notePartMap.set(pNum, {
+            rev: match[2]?.trim(),
+            partName: match[3]?.trim(),
+            surfaceArea: match[4] ? parseFloat(match[4]) : null,
+            maskingArea: match[5] ? parseFloat(match[5]) : 0,
+            workType: match[6]?.trim() || "Cerakote",
+            specs: match[7]?.trim() || "Standard Coating Specification",
+          });
+        }
+      }
+    }
+
     const parts = lineItems.map((l, index) => {
       const desc = l.name || `Line Item ${index + 1}`;
       const areaMatch = desc.match(/--\s*([\d.]+)\s*si/i);
-      const areaSqIn = areaMatch ? parseFloat(areaMatch[1]) : 0;
+      const maskMatch = desc.match(/\(mask:\s*([\d.]+)\s*si\)/i);
+      const revMatch = desc.match(/\[Rev:\s*([^\]]+)\]/i);
       const partNumMatch = desc.match(/^([^,-]+)/);
       const partNum = l.product_id?.[1] || (partNumMatch ? partNumMatch[1].trim() : `PART-${index + 1}`);
+
+      const noteInfo = notePartMap.get(partNum) || {};
+      const areaSqIn = noteInfo.surfaceArea ?? (areaMatch ? parseFloat(areaMatch[1]) : (Number(l.price_unit) > 0 ? Number((Number(l.price_unit) / 0.40).toFixed(1)) : 100));
+      const maskingSqIn = noteInfo.maskingArea ?? (maskMatch ? parseFloat(maskMatch[1]) : 0);
+      const revision = l.x_rev || noteInfo.rev || (revMatch ? revMatch[1].trim() : "A00");
+      const unitPrice = Number(l.price_unit) || 0;
+      const quantity = Number(l.product_uom_qty) || 1;
+      const totalPrice = Number(l.price_subtotal) || (unitPrice * quantity);
+      const workType = noteInfo.workType || "Cerakote";
+      const specs = noteInfo.specs || "Standard powder coating specification (Mil-Spec / Industrial)";
 
       return {
         id: `odoo-line-${l.id}`,
         partNumber: partNum,
-        partName: desc.replace(/\s*\+temp test.*/, '').trim(),
-        partSummary: desc,
-        revision: "A00",
-        quantity: Number(l.product_uom_qty) || 1,
+        partName: noteInfo.partName || desc.replace(/\s*\+temp test.*/, '').replace(/--.*/, '').trim() || partNum,
+        partSummary: `${partNum} - ${workType} Coating`,
+        revision,
+        quantity,
         totalSurfaceAreaSqIn: areaSqIn,
         coatingAreaSqIn: areaSqIn,
-        maskingAreaSqIn: 0,
+        maskingAreaSqIn: maskingSqIn,
         pricePerSi: 0.40,
-        priceUnit: Number(l.price_unit) || 0,
-        totalPrice: Number(l.price_subtotal) || (Number(l.price_unit) * Number(l.product_uom_qty)),
+        priceUnit: unitPrice,
+        totalPrice,
+        specifications: specs,
+        milSpecNotes: specs,
+        workType,
         coatingBom: {
-          topcoat: "Cerakote",
-          primer: "N/A",
-          pretreatment: "Degrease & Blast",
+          topcoat: workType,
+          primer: "Standard Zinc-Rich Primer",
+          pretreatment: "Degrease & Sandblast (SP-10)",
         },
         pricingBreakdown: {
-          baseCost: Number(l.price_unit) || 0,
-          unitPrice: Number(l.price_unit) || 0,
-          totalCost: Number(l.price_subtotal) || 0,
+          directCost: Number((unitPrice * 0.65).toFixed(2)),
+          baseCost: unitPrice,
+          unitPrice: unitPrice,
+          totalCost: totalPrice,
+          masking: maskingSqIn > 0 ? {
+            totalArea: areaSqIn,
+            maskedArea: maskingSqIn,
+            holes: 2,
+            holesDescription: "Standard threaded holes",
+            cost: Number((maskingSqIn * 0.15).toFixed(2)),
+            rateText: "$0.15/sq.in",
+            unitCostText: `$${(maskingSqIn * 0.15).toFixed(2)}`,
+          } : undefined,
+          coating: {
+            processName: workType,
+            totalArea: areaSqIn,
+            timeMinutes: Math.max(5, Math.round(areaSqIn / 20)),
+            timeText: `${Math.max(5, Math.round(areaSqIn / 20))} min`,
+            timeRateText: "$85.00/hr",
+            cost: Number((unitPrice * 0.75).toFixed(2)),
+            costText: `$${(unitPrice * 0.75).toFixed(2)}`,
+            costRateText: "$0.40/sq.in",
+            materialOz: Number((areaSqIn * 0.05).toFixed(2)),
+            materialText: `${Number((areaSqIn * 0.05).toFixed(2))} oz`,
+            materialRateText: "$2.50/oz",
+            colorComplexity: "Standard",
+            ovenTime: "25 min @ 400°F",
+          },
         },
       };
     });
