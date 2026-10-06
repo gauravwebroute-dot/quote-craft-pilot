@@ -179,9 +179,11 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     }
   }
 
-  function findDuplicateQuoteByHash(pdfHash, businessUnit = null) {
-    if (!pdfHash) return null;
-    const row = db
+  // Returns EVERY quote created from the same PDF (same business unit), newest first,
+  // so the operator can review each earlier quote instead of only the latest one.
+  function findDuplicateQuotesByHash(pdfHash, businessUnit = null) {
+    if (!pdfHash) return [];
+    const rows = db
       .prepare(`
         SELECT q.id, q.draft_sequence_id, q.odoo_sequence_id, q.business_unit,
                q.customer_name, q.customer_email, q.pdf_sha256, q.source_file,
@@ -189,34 +191,51 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
                (SELECT COUNT(*) FROM quote_revisions WHERE quote_id = q.id) as revision_count
         FROM quotes q
         WHERE q.pdf_sha256 = ? AND (? IS NULL OR q.business_unit = ?)
-        ORDER BY q.created_at DESC
-        LIMIT 1
+        ORDER BY q.created_at DESC, q.id DESC
       `)
-      .get(pdfHash, businessUnit, businessUnit);
+      .all(pdfHash, businessUnit, businessUnit);
 
-    if (!row) return null;
+    return rows.map((row) => {
+      const lineItems = db
+        .prepare('SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY id ASC')
+        .all(row.id);
+      return {
+        id: row.id,
+        draftSequenceId: row.draft_sequence_id || `QP${getCurrentYearStr()}-0001`,
+        quoteNumber: row.draft_sequence_id || `QP${getCurrentYearStr()}-0001`,
+        odooSequenceId: row.odoo_sequence_id,
+        businessUnit: row.business_unit || 'OC Custom Coating',
+        customerName: row.customer_name || 'Standard Customer',
+        customerEmail: row.customer_email,
+        pdfHash: row.pdf_sha256,
+        sourceFile: row.source_file,
+        status: row.status || 'DRAFT',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        revisionCount: Number(row.revision_count || 1),
+        formPayload: normalizePayload(row.form_payload),
+        lineItems,
+      };
+    });
+  }
 
-    const lineItems = db
-      .prepare('SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY id ASC')
-      .all(row.id);
+  function findDuplicateQuoteByHash(pdfHash, businessUnit = null) {
+    return findDuplicateQuotesByHash(pdfHash, businessUnit)[0] ?? null;
+  }
 
-    return {
-      id: row.id,
-      draftSequenceId: row.draft_sequence_id || `QP${getCurrentYearStr()}-0001`,
-      quoteNumber: row.draft_sequence_id || `QP${getCurrentYearStr()}-0001`,
-      odooSequenceId: row.odoo_sequence_id,
-      businessUnit: row.business_unit || 'OC Custom Coating',
-      customerName: row.customer_name || 'Standard Customer',
-      customerEmail: row.customer_email,
-      pdfHash: row.pdf_sha256,
-      sourceFile: row.source_file,
-      status: row.status || 'DRAFT',
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      revisionCount: Number(row.revision_count || 1),
-      formPayload: normalizePayload(row.form_payload),
-      lineItems,
-    };
+  // Wipes ALL quotes, line items, revisions and resets the sequence counter so the
+  // next quote is QPyy-0001. Only touches this app's own database (never Odoo).
+  function resetAllQuotes() {
+    const count = Number(db.prepare('SELECT COUNT(*) AS c FROM quotes').get()?.c || 0);
+    db.exec('BEGIN');
+    try {
+      db.exec('DELETE FROM quote_line_items; DELETE FROM quote_revisions; DELETE FROM quotes; DELETE FROM quote_counters;');
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    return { deletedQuotes: count, nextDraftSequenceId: getCurrentDraftSequenceId() };
   }
 
   function recordRevision({ quoteId, payload, revisionLabel }) {
@@ -657,6 +676,8 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     getNextDraftSequenceId,
     advanceSequenceCounter,
     findDuplicateQuote: findDuplicateQuoteByHash,
+    findDuplicateQuotes: findDuplicateQuotesByHash,
+    resetAllQuotes,
     recordQuote,
     updateQuoteStatus,
     getHistory,

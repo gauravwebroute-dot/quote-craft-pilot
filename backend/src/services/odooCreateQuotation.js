@@ -156,7 +156,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
     const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
     const rev = p.original?.revision || "";
-    const description = `${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
+    const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.40);
@@ -183,7 +183,7 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
     const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
     const rev = p.original?.revision || "";
-    const description = `${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
+    const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.40);

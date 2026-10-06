@@ -99,6 +99,17 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
           }
         }
 
+        // 3b. Identity normalization + deterministic dedup keys (never trust the model's keys)
+        const cleanKey = (v) => String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const rawRev = typeof part.revision === "string" ? part.revision.trim() : "";
+        const revision = !rawRev || /^(not[_ ]?specified|unknown|none|n\/a|null)$/i.test(rawRev) ? "0" : rawRev;
+        const companyName = (part.companyName?.trim() || extraction.customer?.company?.trim() || null);
+        const dedupKeys = {
+          cleanPartNumber: cleanKey(partNumber),
+          cleanCompanyName: cleanKey(companyName),
+          dedupCompositeKey: cleanKey(companyName) + cleanKey(partNumber),
+        };
+
         // 4. Non-Area Hallucination Guardrail: explicitly NOT_SPECIFIED if unaddressed
         const material = part.material?.trim() || "NOT_SPECIFIED";
         const prepType = part.prepType?.trim() || "NOT_SPECIFIED";
@@ -108,6 +119,9 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
         return {
           ...part,
           partNumber,
+          revision,
+          companyName,
+          dedupKeys,
           isProvisional,
           material,
           prepType,

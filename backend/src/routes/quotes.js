@@ -32,15 +32,19 @@ router.post('/quotes/duplicate-check', async (req, res) => {
     const { pdfHash, sourceFile, customer, parts, businessUnit } = req.body ?? {};
     const hash = pdfHash || hashPayload({ customer, parts, sourceFile });
     // Same PDF only counts as a duplicate within the same company / business unit.
-    const duplicate = await defaultQuoteStore.findDuplicateQuote(hash, businessUnit || null);
+    // ALL earlier quotes created from this same PDF (newest first), not just the latest.
+    const matches = await defaultQuoteStore.findDuplicateQuotes(hash, businessUnit || null);
+    const duplicate = matches[0];
 
     if (!duplicate) {
-      return res.json({ duplicate: false, quote: null, warning: null });
+      return res.json({ duplicate: false, quote: null, quotes: [], warning: null });
     }
 
     return res.json({
       duplicate: true,
       quote: duplicate,
+      quotes: matches,
+      matchCount: matches.length,
       quoteNumber: duplicate.draftSequenceId,
       customerName: duplicate.customerName,
       warning: `This PDF document has already been processed under Quote #${duplicate.draftSequenceId} (Customer: ${duplicate.customerName}).`,
@@ -253,6 +257,24 @@ router.get('/quotes/:id', async (req, res) => {
   } catch (error) {
     console.error('[GET /api/quotes/:id] failed:', error);
     return res.status(500).json({ error: 'QUOTE_FETCH_FAILED', message: 'Could not load quote details.' });
+  }
+});
+
+// Reset: wipes every saved quote in the app database and restarts numbering at QPyy-0001.
+// Requires the exact confirmation phrase. Never touches Odoo.
+router.post('/quotes/reset', async (req, res) => {
+  try {
+    if (process.env.ALLOW_QUOTE_RESET === 'false') {
+      return res.status(403).json({ error: 'RESET_DISABLED', message: 'Reset is disabled on this server.' });
+    }
+    if (req.body?.confirm !== 'RESET') {
+      return res.status(400).json({ error: 'CONFIRMATION_REQUIRED', message: 'Send confirm: "RESET" to wipe all quotes.' });
+    }
+    const result = await defaultQuoteStore.resetAllQuotes();
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[POST /api/quotes/reset] failed:', error);
+    return res.status(500).json({ error: 'QUOTE_RESET_FAILED', message: 'Could not reset quotes.' });
   }
 });
 

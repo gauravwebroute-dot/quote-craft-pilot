@@ -6,13 +6,34 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CopyCheck, PlusSquare, X } from "lucide-react";
+import { AlertTriangle, CopyCheck, Eye, PlusSquare, X } from "lucide-react";
+
+export type DuplicateMatch = {
+  id: number | string;
+  quoteNumber: string;
+  customerName?: string;
+  status?: string;
+  odooSequenceId?: string | null;
+  createdAt?: string;
+  revisionCount?: number;
+  lineItemCount?: number;
+};
 
 export type DuplicateDrawingInfo = {
   quoteNumber?: string;
   customerName?: string;
   revisionCount?: number;
+  /** Every earlier quote created from this same PDF, newest first. */
+  matches?: DuplicateMatch[];
 };
+
+function formatDate(value?: string) {
+  if (!value) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 /**
  * Duplicate Upload Warning Modal (REQ-004, Section 4.2).
@@ -29,6 +50,7 @@ export function DuplicateDrawingDialog({
   onCreateRevision,
   onCreateNewQuote,
   onCancel,
+  onViewQuote,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -36,7 +58,9 @@ export function DuplicateDrawingDialog({
   onCreateRevision: () => void;
   onCreateNewQuote: () => void;
   onCancel: () => void;
+  onViewQuote?: ((match: DuplicateMatch) => void) | undefined;
 }) {
+  const matches = data?.matches ?? [];
   const nextRevision = (data?.revisionCount || 1) + 1;
 
   return (
@@ -54,16 +78,59 @@ export function DuplicateDrawingDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm">
-          <dt className="text-muted-foreground">Quote</dt>
-          <dd className="min-w-0 break-words font-mono font-semibold">
-            {data?.quoteNumber || "QP26-0001"}
-          </dd>
-          <dt className="text-muted-foreground">Customer</dt>
-          <dd className="min-w-0 break-words font-semibold">
-            {data?.customerName || "ABC Metal Works"}
-          </dd>
-        </dl>
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {matches.length > 1
+              ? `This PDF was used in ${matches.length} earlier quotes`
+              : "Earlier quote from this PDF"}
+          </p>
+          <ul className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {(matches.length > 0
+              ? matches
+              : [
+                  {
+                    id: "latest",
+                    quoteNumber: data?.quoteNumber || "-",
+                    customerName: data?.customerName || "-",
+                  } as DuplicateMatch,
+                ]
+            ).map((m) => (
+              <li
+                key={m.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2">
+                    <span className="font-mono font-semibold">{m.quoteNumber}</span>
+                    {m.status ? (
+                      <span className="rounded bg-background px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                        {m.status.replace(/_/g, " ")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {[m.customerName, formatDate(m.createdAt), m.odooSequenceId]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+                {onViewQuote && m.id !== "latest" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-8 shrink-0 border-[#374151]"
+                    title={`View ${m.quoteNumber} (extraction, specs and price breakdown)`}
+                    aria-label={`View ${m.quoteNumber}`}
+                    onClick={() => onViewQuote(m)}
+                  >
+                    <Eye className="size-4" />
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
 
         <p className="text-sm font-medium text-foreground">Select how you would like to proceed:</p>
 

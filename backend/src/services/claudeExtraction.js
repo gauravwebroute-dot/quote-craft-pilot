@@ -38,6 +38,21 @@ const SYSTEM_PROMPT = `You are extracting structured engineering, coating, and R
 
 8. EXTRACT COATING DETAILS VERBATIM:
    Extract primer, topcoat, prep, color, coverage, masking, sequencing, and part mark exactly as written — verbatim with no paraphrasing.
+9. PRIMARY IDENTITY EXTRACTION (drives duplicate detection and Odoo price history - be exact):
+   - partNumber: the main Part / Drawing Number from the main Title Block (usually bottom-right). If several numbers exist (BOM items vs the assembly), use the main sheet identity. Copy it exactly as printed; never invent or reformat it.
+   - revision: the Revision tag from the title block / revision table (e.g. "C00", "REV B", "01"). If it is missing, return "0".
+   - partName: the description/title of the part or assembly from the title block.
+   - companyName: the client, vendor, or owning company from the title block, header, or proprietary notice.
+   - Process every file type (PDF, CAD image, 2D vector, dimensioned or non-dimensioned concept sheet). Set hasDimensions true only if dimensions/tolerances are actually present, and fileType to PDF, CAD_DRAWING or IMAGE.
+   - Also capture material, finish (e.g. CARC, anodized), process notes and overall dimensions when present.
+
+10. DEDUPLICATION KEYS (CRITICAL FOR ODOO SEARCH):
+   For every part also return dedupKeys: UPPERCASE the text and remove ALL spaces, dashes, dots and special characters.
+   - cleanPartNumber = normalized partNumber (e.g. "117-0018-001" -> "1170018001")
+   - cleanCompanyName = normalized companyName
+   - dedupCompositeKey = cleanCompanyName + cleanPartNumber
+   These keys are used to fetch ALL existing quotes of the same part for the same company, even if there are 100+.
+
 - If multiple parts/drawings are provided, return one entry per part in the "parts" array.
 - Always call the record_extraction tool with your findings. Do not respond in plain text.`;
 

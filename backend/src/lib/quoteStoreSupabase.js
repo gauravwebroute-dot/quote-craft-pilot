@@ -63,25 +63,41 @@ export function createQuoteStore({ url = process.env.SUPABASE_URL, key = process
 
   // Duplicate = same PDF hash AND same business unit (company). Same PDF under a
   // different company is NOT a duplicate.
-  async function findDuplicateQuote(pdfHash, businessUnit = null) {
-    if (!pdfHash) return null;
+  async function findDuplicateQuotes(pdfHash, businessUnit = null) {
+    if (!pdfHash) return [];
     let q = sb.from('quotes').select('*').eq('pdf_sha256', pdfHash);
     if (businessUnit) q = q.eq('business_unit', businessUnit);
-    const row = must(
-      await q.order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      'findDuplicate',
+    const rows = must(
+      await q.order('created_at', { ascending: false }).order('id', { ascending: false }),
+      'findDuplicates',
     );
-    if (!row) return null;
-    const lineItems = must(
-      await sb.from('quote_line_items').select('*').eq('quote_id', row.id).order('id'),
-      'findDuplicate:lines',
-    );
-    return {
-      ...mapRow(row),
-      revisionCount: (await countRevisions(row.id)) || 1,
-      formPayload: row.form_payload,
-      lineItems,
-    };
+    const out = [];
+    for (const row of rows ?? []) {
+      const lineItems = must(
+        await sb.from('quote_line_items').select('*').eq('quote_id', row.id).order('id'),
+        'findDuplicates:lines',
+      );
+      out.push({
+        ...mapRow(row),
+        revisionCount: (await countRevisions(row.id)) || 1,
+        formPayload: row.form_payload,
+        lineItems,
+      });
+    }
+    return out;
+  }
+
+  async function findDuplicateQuote(pdfHash, businessUnit = null) {
+    return (await findDuplicateQuotes(pdfHash, businessUnit))[0] ?? null;
+  }
+
+  // Wipes ALL quotes (line items + revisions cascade) and resets the counter so the
+  // next quote is QPyy-0001. Only touches this app's own database (never Odoo).
+  async function resetAllQuotes() {
+    const { count } = await sb.from('quotes').select('*', { count: 'exact', head: true });
+    must(await sb.from('quotes').delete().gte('id', 0), 'resetAll:quotes');
+    must(await sb.from('quote_counters').delete().neq('year', ''), 'resetAll:counters');
+    return { deletedQuotes: count || 0, nextDraftSequenceId: await getCurrentDraftSequenceId() };
   }
 
   async function recordRevision({ quoteId, payload, revisionLabel }) {
@@ -402,6 +418,8 @@ export function createQuoteStore({ url = process.env.SUPABASE_URL, key = process
     getNextDraftSequenceId,
     advanceSequenceCounter,
     findDuplicateQuote,
+    findDuplicateQuotes,
+    resetAllQuotes,
     recordQuote,
     updateQuoteStatus,
     getHistory,

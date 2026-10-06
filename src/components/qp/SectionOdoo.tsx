@@ -467,19 +467,42 @@ export function SectionOdoo({
             {isChecking ? "Verifying..." : "Run Cross-Check"}
           </Button>
 
-          {/* Sync to Odoo Primary Button (REQ-008: Sync Guard Rule) */}
-          <Button
-            onClick={handleSyncToOdooAll}
-            disabled={isSyncing || !crossCheck || !allConflictsResolved || Boolean(syncedOrder)}
-            className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90 disabled:opacity-50"
-          >
-            <ShieldCheck className="size-4 mr-1.5" />
-            {isSyncing
-              ? "Syncing..."
-              : syncedOrder
-                ? `Synced to Odoo (${syncedOrder})`
-                : "Sync to Odoo"}
-          </Button>
+          {/* Sync to Odoo Primary Button (REQ-008: Sync Guard Rule) - always asks Allow / Deny first */}
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                disabled={isSyncing || !crossCheck || !allConflictsResolved || Boolean(syncedOrder)}
+                className="bg-[#1B4332] text-white hover:bg-[#1B4332]/90 disabled:opacity-50"
+              >
+                <ShieldCheck className="size-4 mr-1.5" />
+                {isSyncing
+                  ? "Syncing..."
+                  : syncedOrder
+                    ? `Synced to Odoo (${syncedOrder})`
+                    : "Sync to Odoo"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Allow QuotePilot to write to Odoo?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will create a new quotation in Odoo for{" "}
+                  <strong>{extraction?.customer?.company || "this customer"}</strong> under{" "}
+                  <strong>{businessUnit}</strong> with{" "}
+                  <strong>{extraction?.parts?.length ?? 0}</strong> part line(s).
+                  {crossCheck?.customer?.matched
+                    ? " The existing partner record will be linked."
+                    : " A new customer partner record will also be created."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Deny</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void handleSyncToOdooAll()}>
+                  Allow
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* Price History Button (Matches Screenshot 2 & opens modal) */}
           <Button
@@ -710,13 +733,30 @@ export function SectionOdoo({
                     </div>
 
                     {part.reason === "NO_PRIOR_QUOTE_FOR_THIS_PART" && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Searched customer records for "
-                        {crossCheck.customer?.record?.name ||
-                          extraction?.customer?.company ||
-                          "this customer"}
-                        " in this company; no earlier quote line matched part {part.partNumber}.
-                      </p>
+                      <Alert className="mt-2.5 border-[#D97706]/40 bg-[#D97706]/10">
+                        <AlertCircle className="size-4 text-[#D97706]" />
+                        <AlertDescription className="text-xs text-foreground">
+                          <strong>
+                            {crossCheck.customer?.record?.name ||
+                              extraction?.customer?.company ||
+                              "This customer"}
+                          </strong>{" "}
+                          is an existing customer in <strong>{businessUnit}</strong>, but part{" "}
+                          <strong>{part.partNumber}</strong> has not been quoted to them before -
+                          this is a new part for an existing customer.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {part.reason === "NEW_CUSTOMER" && (
+                      <Alert className="mt-2.5 border-[#1E40AF]/40 bg-[#1E40AF]/10">
+                        <AlertCircle className="size-4 text-[#1E40AF]" />
+                        <AlertDescription className="text-xs text-foreground">
+                          <strong>{extraction?.customer?.company || "This customer"}</strong> has no
+                          orders in <strong>{businessUnit}</strong> yet - treated as a new customer
+                          (a partner record will be created when you sync).
+                        </AlertDescription>
+                      </Alert>
                     )}
 
                     {hasPriorQuotes && (

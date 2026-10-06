@@ -146,25 +146,7 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
     let priorQuotes = [];
 
     if (partner && part.partNumber) {
-      const lines = await odooCall("object", "execute_kw", [
-        process.env.ODOO_DB,
-        uid,
-        process.env.ODOO_API_KEY,
-        "sale.order.line",
-        "search_read",
-        [[
-          ["order_id.partner_id", "=", partner.id],
-          ["order_id.company_id", "=", companyId],
-          ["order_id.state", "!=", "cancel"],
-          ["name", "ilike", part.partNumber],
-        ]],
-        {
-          fields: ["id", "name", "price_unit", "product_uom_qty", "price_subtotal", "order_id", "create_date", "x_rev", "x_sq_in_per_unit", "x_price_per_si"],
-          context: { allowed_company_ids: [companyId] },
-          limit: 10,
-          order: "id desc",
-        },
-      ]);
+      const lines = await findPriorLinesForPart(uid, partner, companyId, part);
 
       if (lines.length > 0) {
         foundPriorCount++;
@@ -327,6 +309,118 @@ async function resolveTestTagId(uid) {
     "create",
     [{ name: TEST_TAG_NAME }],
   ]);
+}
+
+// Strips everything except letters/digits so "117-0018-001", "117 0018 001" and
+// "1170018001" all compare equal.
+export function normalizeKey(value) {
+  return String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+const LINE_FIELDS = [
+  "id", "name", "price_unit", "product_uom_qty", "price_subtotal",
+  "order_id", "create_date", "x_rev", "x_sq_in_per_unit", "x_price_per_si",
+];
+const LINE_FIELDS_BASE = ["id", "name", "price_unit", "product_uom_qty", "price_subtotal", "order_id", "create_date"];
+
+async function searchLines(uid, domain, companyId, fields, limit = 20) {
+  return odooCall("object", "execute_kw", [
+    process.env.ODOO_DB,
+    uid,
+    process.env.ODOO_API_KEY,
+    "sale.order.line",
+    "search_read",
+    [domain],
+    { fields, context: { allowed_company_ids: [companyId] }, limit, order: "id desc" },
+  ]);
+}
+
+// Finds earlier quote lines for this customer + company + part number.
+// Odoo line names are "<partNumber> - <partName> [Rev: x] -- N si ..." for new quotes but
+// older quotes were written WITHOUT the part number, so we also look at the product and at the
+// order note ("#1: <partNumber> [Rev: ..") that the app always stores. Matching is also done on a
+// normalized key so dashes/spaces/case never cause a miss.
+async function findPriorLinesForPart(uid, partner, companyId, part) {
+  const pn = String(part.partNumber).trim();
+  const normPn = normalizeKey(pn);
+  if (!normPn) return [];
+
+  const base = [
+    ["order_id.partner_id", "=", partner.id],
+    ["order_id.company_id", "=", companyId],
+    ["order_id.state", "!=", "cancel"],
+  ];
+  // Variants: exact text, and a version with separators replaced by "_" (single-char wildcard in SQL ilike)
+  const wildcard = pn.replace(/[^A-Za-z0-9]/g, "_");
+  const variants = Array.from(new Set([pn, wildcard]));
+  const orOf = (field) => variants.map((v) => [field, "ilike", v]);
+  const orDomain = (clauses) => [...Array(Math.max(clauses.length - 1, 0)).fill("|"), ...clauses];
+
+  const attempts = [
+    // 1. line name OR product name OR product code
+    [...orOf("name"), ...orOf("product_id.name"), ...orOf("product_id.default_code")],
+    // 2. line name only (older Odoo / missing product relation)
+    [...orOf("name")],
+  ];
+
+  let lines = [];
+  for (const clauses of attempts) {
+    const domain = [...base, ...orDomain(clauses)];
+    for (const fields of [LINE_FIELDS, LINE_FIELDS_BASE]) {
+      try {
+        lines = await searchLines(uid, domain, companyId, fields);
+        break;
+      } catch (err) {
+        console.warn(`[crossCheck] part line search failed (${fields.length} fields):`, err.message);
+        lines = [];
+      }
+    }
+    if (lines.length > 0) break;
+  }
+
+  // Keep only lines that truly contain the part number once normalized (drops "_" false positives)
+  lines = lines.filter((l) => normalizeKey(l.name).includes(normPn));
+  if (lines.length > 0) return lines;
+
+  // Legacy fallback: quotes created before the part number was added to the line name.
+  try {
+    const orders = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "sale.order",
+      "search_read",
+      [[
+        ["partner_id", "=", partner.id],
+        ["company_id", "=", companyId],
+        ["state", "!=", "cancel"],
+        ...orDomain(orOf("note")),
+      ]],
+      { fields: ["id", "note"], context: { allowed_company_ids: [companyId] }, limit: 20, order: "id desc" },
+    ]);
+    const matched = (orders || []).filter((o) => normalizeKey(o.note).includes(normPn));
+    if (matched.length === 0) return [];
+
+    const orderLines = await searchLines(uid, [["order_id", "in", matched.map((o) => o.id)]], companyId, LINE_FIELDS_BASE, 100).catch(() => []);
+    const byOrder = new Map();
+    for (const l of orderLines) {
+      const oid = l.order_id?.[0];
+      if (!byOrder.has(oid)) byOrder.set(oid, []);
+      byOrder.get(oid).push(l);
+    }
+    const partName = normalizeKey(part.partName);
+    const out = [];
+    for (const o of matched) {
+      const ols = byOrder.get(o.id) || [];
+      const byName = partName ? ols.filter((l) => normalizeKey(l.name).includes(partName)) : [];
+      if (byName.length > 0) out.push(...byName);
+      else if (ols.length === 1) out.push(...ols);
+    }
+    return out;
+  } catch (err) {
+    console.warn("[crossCheck] legacy note search failed:", err.message);
+    return [];
+  }
 }
 
 async function findLivePartner(uid, customer, companyId) {

@@ -38,6 +38,19 @@ export function advanceLocalSequence(): string {
   return nextSeq;
 }
 
+/** Clears every locally stored quote and restarts numbering at QPyy-0001. */
+export function resetLocalQuoteData(): string {
+  const first = `QP${getCurrentYear()}-0001`;
+  if (typeof window === "undefined") return first;
+  try {
+    localStorage.removeItem(STORAGE_KEY_QUOTES);
+    localStorage.setItem(STORAGE_KEY_SEQ, first);
+  } catch {
+    // storage unavailable - nothing to clear
+  }
+  return first;
+}
+
 export function setLocalSequence(seq: string): void {
   if (typeof window !== "undefined" && seq) {
     localStorage.setItem(STORAGE_KEY_SEQ, seq);

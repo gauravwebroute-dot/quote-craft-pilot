@@ -12,6 +12,7 @@ import {
   advanceLocalSequence,
   setLocalSequence,
   saveLocalQuote,
+  resetLocalQuoteData,
 } from "@/lib/localQuoteStore";
 import { Button } from "@/components/ui/button";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
@@ -135,6 +136,31 @@ function QuotePilot() {
     setFocusedSection("overview");
   };
 
+  // Reset: wipes every saved quote in the database + this browser and restarts at QPyy-0001
+  const handleResetNumbering = async () => {
+    try {
+      const response = await fetch(`${apiUrl()}/api/quotes/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "RESET" }),
+      });
+      if (!response.ok) throw new Error("Server reset failed.");
+      const data = await response.json();
+      const first = resetLocalQuoteData();
+      const next = data?.nextDraftSequenceId || first;
+      setLocalSequence(next);
+      setDraftSequenceId(next);
+      setExtraction(null);
+      setUploadedFiles([]);
+      setOdooOrderId(null);
+      setStep(0);
+      setFocusedSection("overview");
+    } catch (err) {
+      console.error("Reset failed:", err);
+      window.alert("Reset failed - the database was not cleared. Please try again.");
+    }
+  };
+
   // Save Draft (retains draft sequence ID without advancing, per Section 2.1 #2)
   const handleSaveDraft = async () => {
     if (!extraction) return;
@@ -178,6 +204,7 @@ function QuotePilot() {
         onOpenHistory={() => setHistoryOpen(true)}
         onNewQuote={handleNewQuote}
         onSaveDraft={handleSaveDraft}
+        onResetNumbering={handleResetNumbering}
         quoteNumber={activeQuoteNumber}
       />
 
@@ -238,6 +265,7 @@ function QuotePilot() {
                 currentDraftId={draftSequenceId}
                 businessUnit={businessUnit}
                 onBusinessUnitChange={setBusinessUnit}
+                onViewQuote={handleRehydrateState}
                 onRun={(result, files) => {
                   setExtraction(result);
                   setUploadedFiles(files);

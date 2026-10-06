@@ -12,8 +12,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DuplicateDrawingDialog } from "./DuplicateDrawingDialog";
+import { DuplicateDrawingDialog, type DuplicateMatch } from "./DuplicateDrawingDialog";
 import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles } from "lucide-react";
+import type { QuoteRecord } from "./QuoteHistoryDialog";
+import { getLocalQuotes } from "@/lib/localQuoteStore";
+
+function apiBase() {
+  return (
+    import.meta.env["VITE_EXTRACTION_API_URL"] ||
+    (typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ? "http://localhost:4000"
+      : "https://quote-craft-pilot.onrender.com")
+  ).replace(/\/$/, "");
+}
 
 const emailBody = `Hi,
 Could we please get pricing for the attached items? The qty will be 6 each.
@@ -112,14 +124,43 @@ type DuplicateInfo = {
   customerName: string;
   quoteId?: number | string;
   revisionCount?: number;
+  matches?: DuplicateMatch[];
 };
+
+// Builds the duplicate-dialog data from the backend response (all quotes made from this PDF).
+function toDuplicateInfo(data: any): DuplicateInfo {
+  const list: any[] =
+    Array.isArray(data?.quotes) && data.quotes.length
+      ? data.quotes
+      : data?.quote
+        ? [data.quote]
+        : [];
+  const latest = list[0] ?? data?.quote;
+  return {
+    quoteNumber: data?.quoteNumber || latest?.draftSequenceId || "-",
+    customerName: data?.customerName || latest?.customerName || "-",
+    quoteId: latest?.id,
+    revisionCount: latest?.revisionCount || 1,
+    matches: list.map((q) => ({
+      id: q.id,
+      quoteNumber: q.draftSequenceId || q.quoteNumber,
+      customerName: q.customerName,
+      status: q.status,
+      odooSequenceId: q.odooSequenceId,
+      createdAt: q.createdAt,
+      revisionCount: q.revisionCount,
+    })),
+  };
+}
 
 export function SectionInput({
   onRun,
   currentDraftId,
   businessUnit = "OC Custom Coating",
   onBusinessUnitChange,
+  onViewQuote,
 }: {
+  onViewQuote?: (quote: QuoteRecord, payload: ExtractionResult) => void;
   onRun: (
     extraction: ExtractionResult,
     files: File[],
@@ -187,12 +228,22 @@ export function SectionInput({
     };
   }, []);
 
-  const computePdfHash = async (files: File[]) => {
-    if (!files.length) return null;
-    const file = files[0];
-    if (!file) return null;
+  const sha256Hex = async (file: File) => {
     const buffer = await file.arrayBuffer();
     const digest = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  };
+
+  // One file keeps its plain SHA-256 (so earlier quotes still match); several files are
+  // combined order-independently so the same set of PDFs always gives the same hash.
+  const computePdfHash = async (files: File[]) => {
+    if (!files.length) return null;
+    const hashes = await Promise.all(files.map(sha256Hex));
+    if (hashes.length === 1) return hashes[0] ?? null;
+    const combined = new TextEncoder().encode([...hashes].sort().join("|"));
+    const digest = await crypto.subtle.digest("SHA-256", combined);
     return Array.from(new Uint8Array(digest))
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
@@ -232,12 +283,7 @@ export function SectionInput({
           if (res.ok) {
             const data = await res.json();
             if (data.duplicate) {
-              setDuplicateData({
-                quoteNumber: data.quoteNumber || data.quote?.draftSequenceId || "QP26-0001",
-                customerName: data.customerName || data.quote?.customerName || "ABC Metal Works",
-                quoteId: data.quote?.id,
-                revisionCount: data.quote?.revisionCount || 1,
-              });
+              setDuplicateData(toDuplicateInfo(data));
               setDuplicateModalOpen(true);
             }
           }
@@ -292,18 +338,7 @@ export function SectionInput({
         });
         const duplicatePayload = await duplicateResponse.json();
         if (duplicatePayload.duplicate) {
-          setDuplicateData({
-            quoteNumber:
-              duplicatePayload.quoteNumber ||
-              duplicatePayload.quote?.draftSequenceId ||
-              "QP26-0001",
-            customerName:
-              duplicatePayload.customerName ||
-              duplicatePayload.quote?.customerName ||
-              "ABC Metal Works",
-            quoteId: duplicatePayload.quote?.id,
-            revisionCount: duplicatePayload.quote?.revisionCount || 1,
-          });
+          setDuplicateData(toDuplicateInfo(duplicatePayload));
           setPendingExtractionPayload(payload.extraction);
           setDuplicateModalOpen(true);
           setIsExtracting(false);
@@ -378,6 +413,27 @@ export function SectionInput({
   const handleModalCreateNewQuote = async () => {
     setDuplicateModalOpen(false);
     await executeExtraction(true);
+  };
+
+  // View an earlier quote made from this same PDF (full extraction, specs and price breakdown)
+  const handleViewDuplicate = async (match: DuplicateMatch) => {
+    try {
+      const local = getLocalQuotes().find((l) => l.draftSequenceId === match.quoteNumber);
+      let record = local as QuoteRecord | undefined;
+      let payload = local?.formPayload;
+      if (!payload) {
+        const response = await fetch(`${apiBase()}/api/quotes/${match.id}`);
+        if (!response.ok) throw new Error("Could not load that quote.");
+        const data = await response.json();
+        record = data.quote as QuoteRecord;
+        payload = data.quote?.formPayload;
+      }
+      if (!record || !payload) throw new Error("That quote has no saved extraction to show.");
+      setDuplicateModalOpen(false);
+      onViewQuote?.(record, payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open that quote.");
+    }
   };
 
   const handleModalCancel = () => {
@@ -603,6 +659,7 @@ export function SectionInput({
         onCreateRevision={handleModalCreateRevision}
         onCreateNewQuote={handleModalCreateNewQuote}
         onCancel={handleModalCancel}
+        onViewQuote={onViewQuote ? handleViewDuplicate : undefined}
       />
     </div>
   );
