@@ -2,45 +2,30 @@ import { Router } from "express";
 
 const router = Router();
 
-// Fallback curated model list if OpenRouter API is unreachable or rate limited
-const FALLBACK_MODELS = [
-  {
-    id: "~google/gemini-flash-latest",
-    name: "Gemini Flash (latest)",
-    description: "Default • Fast, high-throughput multimodal parsing",
-    isDefault: true,
-  },
-  {
-    id: "~anthropic/claude-sonnet-latest",
-    name: "Claude Sonnet (latest)",
-    description: "Precision blueprint & engineering drawing extraction",
-    isDefault: false,
-  },
-  {
-    id: "meta-llama/llama-4-scout",
-    name: "Llama 4 Scout Vision (Groq)",
-    description: "Ultra-fast open-weights vision parsing",
-    isDefault: false,
-  },
-  {
-    id: "~google/gemini-pro-latest",
-    name: "Gemini Pro (latest)",
-    description: "Deep reasoning & complex multi-part drawing analysis",
-    isDefault: false,
-  },
-  {
-    id: "openai/gpt-4o",
-    name: "GPT-4o",
-    description: "High-accuracy vision and title block recognition",
-    isDefault: false,
-  },
-  {
-    id: "google/gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    description: "Next-gen lightweight vision model",
-    isDefault: false,
-  },
+// Curated slots. Each slot prefers a stable OpenRouter "~latest" alias (so renamed / newer models are
+// picked up automatically) and otherwise falls back to the newest live model matching `match`
+// that accepts image input.
+const SLOTS = [
+  { id: "~google/gemini-flash-latest", match: /^google\/gemini-[\d.]+-flash(?!.*(lite|image|preview-tts))/, name: "Gemini Flash (latest)", description: "Default • Fast, accurate multimodal drawing parsing", isDefault: true },
+  { id: "~anthropic/claude-sonnet-latest", match: /^anthropic\/claude-(sonnet|[\d.]+-sonnet)/, name: "Claude Sonnet (latest)", description: "Best precision for engineering drawings & title blocks", isDefault: false },
+  { id: "~anthropic/claude-opus-latest", match: /^anthropic\/claude-(opus|[\d.]+-opus)/, name: "Claude Opus (latest)", description: "Highest accuracy for complex multi-part drawings", isDefault: false },
+  { id: "~google/gemini-pro-latest", match: /^google\/gemini-[\d.]+-pro(?!.*(image|preview-tts))/, name: "Gemini Pro (latest)", description: "Deep reasoning on dense, multi-page drawings", isDefault: false },
+  { id: "x-ai/grok", match: /^x-ai\/grok-(?!.*(fast|mini|code))/, name: "Grok (latest vision)", description: "xAI Grok vision model", isDefault: false },
+  { id: "~openai/gpt-latest", match: /^openai\/gpt-[\d.]+(?!.*(mini|nano|codex|image|audio|chat))/, name: "GPT (latest)", description: "Strong general vision & structured output", isDefault: false },
 ];
+
+const FALLBACK_MODELS = SLOTS.filter((s) => s.id.startsWith("~")).map(({ id, name, description, isDefault }) => ({
+  id,
+  name,
+  description,
+  isDefault,
+}));
+
+const acceptsImages = (m) => {
+  const inputs = m?.architecture?.input_modalities;
+  if (Array.isArray(inputs)) return inputs.includes("image");
+  return String(m?.architecture?.modality || "").split("->")[0].includes("image");
+};
 
 let cachedModels = null;
 let cacheTime = 0;
@@ -67,48 +52,30 @@ router.get("/models", async (_req, res) => {
     const data = await response.json();
     const rawList = Array.isArray(data?.data) ? data.data : [];
 
-    // Filter for multimodal / vision capable models
-    const visionKeywords = ["gemini", "claude", "gpt-4o", "vision", "scout", "pixtral", "qwen-vl", "vl"];
-    const matched = rawList.filter((m) => {
-      const id = (m.id || "").toLowerCase();
-      const name = (m.name || "").toLowerCase();
-      const desc = (m.description || "").toLowerCase();
-      const modalities = Array.isArray(m.architecture?.modality) ? m.architecture.modality.join(",") : "";
-      return (
-        modalities.includes("image") ||
-        visionKeywords.some((kw) => id.includes(kw) || name.includes(kw) || desc.includes(kw))
-      );
-    });
+    const vision = rawList.filter(acceptsImages);
+    const finalModels = [];
+    for (const slot of SLOTS) {
+      let hit = rawList.find((m) => m.id === slot.id && acceptsImages(m));
+      if (!hit) {
+        hit = vision
+          .filter((m) => slot.match.test(m.id) && !m.id.startsWith("~"))
+          .sort((x, y) => (y.created || 0) - (x.created || 0))[0];
+      }
+      if (!hit) continue;
+      if (finalModels.some((m) => m.id === hit.id)) continue;
+      finalModels.push({
+        id: hit.id,
+        name: slot.name,
+        description: slot.description,
+        context_length: hit.context_length,
+        pricing: hit.pricing,
+        isDefault: slot.isDefault,
+      });
+    }
+    if (finalModels.length === 0) throw new Error("No curated models found in OpenRouter list");
+    if (!finalModels.some((m) => m.isDefault)) finalModels[0].isDefault = true;
 
-    // Format models with friendly names and descriptions
-    const formatted = matched.map((m) => {
-      const isDefault = m.id.includes("gemini-flash") || m.id === "~google/gemini-flash-latest";
-      return {
-        id: m.id,
-        name: m.name || m.id,
-        description: m.description ? m.description.slice(0, 100) : "Multimodal model for blueprint extraction",
-        context_length: m.context_length,
-        pricing: m.pricing,
-        isDefault,
-      };
-    });
-
-    // Ensure Gemini Flash is always present at top
-    const hasDefault = formatted.some((m) => m.id === "~google/gemini-flash-latest" || m.isDefault);
-    const finalModels = hasDefault
-      ? formatted
-      : [FALLBACK_MODELS[0], ...formatted];
-
-    // Sort to put default Gemini and popular models first
-    finalModels.sort((a, b) => {
-      if (a.id === "~google/gemini-flash-latest" || a.id.includes("gemini-flash")) return -1;
-      if (b.id === "~google/gemini-flash-latest" || b.id.includes("gemini-flash")) return 1;
-      if (a.id.includes("claude-sonnet")) return -1;
-      if (b.id.includes("claude-sonnet")) return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    cachedModels = finalModels.slice(0, 30); // Return top relevant vision models
+    cachedModels = finalModels;
     cacheTime = now;
 
     return res.json({ models: cachedModels, defaultModel: "~google/gemini-flash-latest" });

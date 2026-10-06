@@ -201,6 +201,14 @@ export function SectionOdoo({
       if (!response.ok) throw new Error(payload.message || "Odoo cross-check failed.");
       setCrossCheck(payload);
       setConflicts(payload.conflicts || []);
+      // Same customer + same part found earlier: show the price-history pop-up automatically.
+      const hit = payload.parts?.find(
+        (p) => p.reason === "EXISTING_QUOTE_FOUND" && (p.priorQuotes?.length || p.previousQuote),
+      );
+      if (hit) {
+        setSelectedPartForHistory(hit);
+        setPriceHistoryOpen(true);
+      }
     } catch (requestError) {
       setError(
         requestError instanceof TypeError
@@ -353,14 +361,29 @@ export function SectionOdoo({
   };
 
   // Opens an earlier quote (by its Odoo order name) with all its extracted data, specs and pricing.
-  const handleViewEarlierQuote = async (orderName: string) => {
+  const handleViewEarlierQuote = async (q: PriorQuoteDetail) => {
+    // Try the app's own saved record first (QPyy-nnnn), then the live Odoo order by id, then by name.
+    const bareName = q.quoteName.replace(/\s*\(.*\)\s*$/, "").trim();
+    const candidates = [
+      q.clientRef,
+      q.saleOrderId ? `odoo-${q.saleOrderId}` : null,
+      bareName,
+      q.quoteName,
+    ].filter((v, i, arr): v is string => !!v && arr.indexOf(v) === i);
     try {
-      const response = await fetch(`${apiUrl()}/api/quotes/${encodeURIComponent(orderName)}`);
-      if (!response.ok) throw new Error("Could not load that quote.");
-      const data = await response.json();
-      if (!data.quote?.formPayload) throw new Error("That quote has no saved details to show.");
-      setPriceHistoryOpen(false);
-      onViewQuote?.(data.quote, data.quote.formPayload);
+      for (const id of candidates) {
+        const response = await fetch(`${apiUrl()}/api/quotes/${encodeURIComponent(id)}`);
+        if (!response.ok) continue;
+        const data = await response.json();
+        const quote = data.quote;
+        if (!quote) continue;
+        const payload = quote.formPayload;
+        if (!payload?.parts?.length) continue;
+        setPriceHistoryOpen(false);
+        onViewQuote?.(quote, payload);
+        return;
+      }
+      throw new Error("No saved extraction details were found for that quote.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open that quote.");
     }
@@ -971,7 +994,7 @@ export function SectionOdoo({
                                     className="size-7"
                                     title="View full extracted data, specs and price breakdown of this quote"
                                     aria-label={`View ${q.quoteName}`}
-                                    onClick={() => void handleViewEarlierQuote(q.quoteName)}
+                                    onClick={() => void handleViewEarlierQuote(q)}
                                   >
                                     <Eye className="size-4" />
                                   </Button>

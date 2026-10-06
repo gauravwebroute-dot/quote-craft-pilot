@@ -112,15 +112,21 @@ const DEFAULT_MODELS: ModelOption[] = [
     isDefault: false,
   },
   {
-    id: "meta-llama/llama-4-scout",
-    name: "Llama 4 Scout Vision (Groq)",
-    description: "Ultra-fast open-weights vision parsing",
+    id: "~anthropic/claude-opus-latest",
+    name: "Claude Opus (latest)",
+    description: "Highest accuracy for complex multi-part drawings",
     isDefault: false,
   },
   {
     id: "~google/gemini-pro-latest",
     name: "Gemini Pro (latest)",
-    description: "Deep reasoning & complex multi-part drawing analysis",
+    description: "Deep reasoning on dense, multi-page drawings",
+    isDefault: false,
+  },
+  {
+    id: "~openai/gpt-latest",
+    name: "GPT (latest)",
+    description: "Strong general vision & structured output",
     isDefault: false,
   },
 ];
