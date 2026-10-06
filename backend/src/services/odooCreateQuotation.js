@@ -1,4 +1,14 @@
-import { crossCheckOdoo, odooAuth, odooCall, isLiveConfigured, resolveTestCompanyId, resolveTestTagId, TEST_COMPANY_NAME, TEST_TAG_NAME } from "./odooCrossCheck.js";
+import {
+  findReusablePartner,
+  crossCheckOdoo,
+  odooAuth,
+  odooCall,
+  isLiveConfigured,
+  resolveTestCompanyId,
+  resolveTestTagId,
+  TEST_COMPANY_NAME,
+  TEST_TAG_NAME,
+} from "./odooCrossCheck.js";
 
 /**
  * ============================================================================
@@ -33,7 +43,13 @@ import { crossCheckOdoo, odooAuth, odooCall, isLiveConfigured, resolveTestCompan
  * @param {boolean} params.confirm - MUST be exactly `true`. This is the
  *   caller's explicit "yes, write this" signal.
  */
-export async function createOdooQuotation({ customer = {}, parts = [], formPayload = null, businessUnit = "", confirm }) {
+export async function createOdooQuotation({
+  customer = {},
+  parts = [],
+  formPayload = null,
+  businessUnit = "",
+  confirm,
+}) {
   if (confirm !== true) {
     throw new SafetyError("Refusing to write to Odoo: `confirm` must be exactly `true`.");
   }
@@ -46,35 +62,33 @@ export async function createOdooQuotation({ customer = {}, parts = [], formPaylo
   // Always re-run the duplicate check ourselves, right now, server-side with the target company.
   const freshCheck = await crossCheckOdoo({ customer, parts, businessUnit: targetBu });
 
-  const toCreate = [];
+  // Every confirmed sync creates a NEW quotation, even when the part was quoted before: price history
+  // is built from those repeated quotations. (Earlier versions skipped "existing" parts, returned
+  // nothing, and the UI then invented a fake order number.)
   const skipped = [];
-  for (const partResult of freshCheck.parts) {
-    if (partResult.reason === "EXISTING_QUOTE_FOUND") {
-      skipped.push({
-        partNumber: partResult.partNumber,
-        reason: "EXISTING_QUOTE_FOUND",
-        previousQuote: partResult.previousQuote,
-      });
-    } else {
-      const original = parts.find((p) => (p.partNumber ?? null) === partResult.partNumber);
-      toCreate.push({ ...partResult, original });
-    }
-  }
-
-  if (toCreate.length === 0) {
-    return {
-      mode: freshCheck.mode,
-      created: null,
-      skipped,
-      message: "Nothing to create - every part already has an existing quote in Odoo.",
-    };
-  }
+  const toCreate = freshCheck.parts.map((partResult) => ({
+    ...partResult,
+    original: parts.find((p) => (p.partNumber ?? null) === partResult.partNumber),
+  }));
 
   if (!isLiveConfigured()) {
-    return createDummyQuotation({ customer, toCreate, skipped, formPayload, businessUnit: targetBu });
+    return createDummyQuotation({
+      customer,
+      toCreate,
+      skipped,
+      formPayload,
+      businessUnit: targetBu,
+    });
   }
 
-  return createLiveQuotation({ customer, freshCheck, toCreate, skipped, formPayload, businessUnit: targetBu });
+  return createLiveQuotation({
+    customer,
+    freshCheck,
+    toCreate,
+    skipped,
+    formPayload,
+    businessUnit: targetBu,
+  });
 }
 
 function createDummyQuotation({ customer, toCreate, skipped, formPayload, businessUnit }) {
@@ -107,13 +121,22 @@ function createDummyQuotation({ customer, toCreate, skipped, formPayload, busine
   return result;
 }
 
-async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, formPayload, businessUnit }) {
+async function createLiveQuotation({
+  customer,
+  freshCheck,
+  toCreate,
+  skipped,
+  formPayload,
+  businessUnit,
+}) {
   const uid = await odooAuth();
   const companyId = freshCheck.company?.id || (await resolveTestCompanyId(uid, businessUnit));
   const companyName = freshCheck.company?.name || businessUnit || TEST_COMPANY_NAME;
   const tagId = await resolveTestTagId(uid);
 
-  let partnerId = freshCheck.customer?.record?.id ?? null;
+  // Reuse the existing customer record (never create a second "ABC Company").
+  let partnerId =
+    freshCheck.customer?.record?.id ?? (await findReusablePartner(uid, customer, companyId));
   let partnerCreated = false;
 
   if (!partnerId) {
@@ -126,13 +149,21 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
       process.env.ODOO_API_KEY,
       "res.partner",
       "create",
-      [{ name: customer.company || customer.email, email: customer.email || false, company_id: companyId }],
+      [
+        {
+          name: customer.company || customer.email,
+          email: customer.email || false,
+          company_id: companyId,
+        },
+      ],
     ]);
     partnerCreated = true;
   }
 
   const draftRef = formPayload?.draftSequenceId || "QP26-0001";
-  const payloadBlob = JSON.stringify(formPayload || { customer, parts: toCreate.map((p) => p.original) });
+  const payloadBlob = JSON.stringify(
+    formPayload || { customer, parts: toCreate.map((p) => p.original) },
+  );
 
   // Rich notes summarizing every extracted detail (minor to major) for full visibility in Odoo
   const noteSummary = [
@@ -159,8 +190,9 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
-    const pricePerSi = Number(p.original?.pricePerSi || 0.40);
-    const unitPrice = computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
+    const pricePerSi = Number(p.original?.pricePerSi || 0.4);
+    const unitPrice =
+      computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
 
     return [
       0,
@@ -186,8 +218,9 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
     const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
-    const pricePerSi = Number(p.original?.pricePerSi || 0.40);
-    const unitPrice = computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
+    const pricePerSi = Number(p.original?.pricePerSi || 0.4);
+    const unitPrice =
+      computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
 
     return [
       0,
@@ -267,7 +300,12 @@ async function createLiveQuotation({ customer, freshCheck, toCreate, skipped, fo
 
   auditLog("LIVE_CREATE", customer, created, skipped);
 
-  return { mode: "live", created, skipped, message: `Quotation created in Odoo under "${companyName}", tagged "${TEST_TAG_NAME}".` };
+  return {
+    mode: "live",
+    created,
+    skipped,
+    message: `Quotation created in Odoo under "${companyName}", tagged "${TEST_TAG_NAME}".`,
+  };
 }
 
 function auditLog(kind, customer, created, skipped) {

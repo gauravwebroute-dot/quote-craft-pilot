@@ -82,8 +82,14 @@ export async function extractFromFiles(files, emailText, modelName) {
     return await executeExtraction(files, emailText, model, apiKey);
   } catch (err) {
     // If the chosen model failed and it was not already the default Gemini model, fallback automatically
-    if (model !== defaultModel && model !== "google/gemini-2.5-flash" && model !== "~google/gemini-flash-latest") {
-      console.warn(`[OpenRouter] Extraction with model "${model}" failed (${err.message}). Falling back to Gemini: "${defaultModel}"`);
+    if (
+      model !== defaultModel &&
+      model !== "google/gemini-2.5-flash" &&
+      model !== "~google/gemini-flash-latest"
+    ) {
+      console.warn(
+        `[OpenRouter] Extraction with model "${model}" failed (${err.message}). Falling back to Gemini: "${defaultModel}"`,
+      );
       try {
         const fallbackResult = await executeExtraction(files, emailText, defaultModel, apiKey);
         if (fallbackResult) {
@@ -150,6 +156,7 @@ async function executeExtraction(files, emailText, model, apiKey) {
 
   const payload = {
     model,
+    temperature: 0,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },
@@ -167,7 +174,7 @@ async function executeExtraction(files, emailText, model, apiKey) {
   const response = await fetch(OPENROUTER_API_URL, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://quotepilot.app",
       "X-Title": "QuotePilot RFQ Extraction",
@@ -183,7 +190,10 @@ async function executeExtraction(files, emailText, model, apiKey) {
     } catch {
       // not JSON
     }
-    const message = errorJson?.error?.message || errorText || `OpenRouter request failed with status ${response.status}`;
+    const message =
+      errorJson?.error?.message ||
+      errorText ||
+      `OpenRouter request failed with status ${response.status}`;
     const err = new Error(`OpenRouter API error (${response.status}): ${message}`);
     err.status = response.status;
     throw err;
@@ -193,9 +203,10 @@ async function executeExtraction(files, emailText, model, apiKey) {
   const choice = result.choices?.[0];
 
   // 1. Check for tool call
-  const toolCall = choice?.message?.tool_calls?.find(
-    (tc) => tc.function?.name === "record_extraction" || tc.type === "function"
-  ) || choice?.message?.tool_calls?.[0];
+  const toolCall =
+    choice?.message?.tool_calls?.find(
+      (tc) => tc.function?.name === "record_extraction" || tc.type === "function",
+    ) || choice?.message?.tool_calls?.[0];
 
   if (toolCall?.function?.arguments) {
     try {
@@ -210,11 +221,16 @@ async function executeExtraction(files, emailText, model, apiKey) {
   // 2. Fallback: check choice.message.content if the model returned raw JSON
   if (choice?.message?.content) {
     const content = choice.message.content.trim();
-    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const cleaned = content
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
     try {
       return JSON.parse(cleaned);
     } catch {
-      throw new Error(`Model did not return tool_calls and content was not valid JSON: ${content.slice(0, 200)}`);
+      throw new Error(
+        `Model did not return tool_calls and content was not valid JSON: ${content.slice(0, 200)}`,
+      );
     }
   }
 

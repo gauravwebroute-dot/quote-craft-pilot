@@ -78,6 +78,7 @@ export async function extractFromFiles(files, emailText) {
     model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
     systemInstruction: SYSTEM_PROMPT,
     generationConfig: {
+      temperature: 0,
       responseMimeType: "application/json",
       responseSchema,
     },
@@ -89,7 +90,9 @@ export async function extractFromFiles(files, emailText) {
     parts.push({ inlineData: { mimeType: file.mediaType, data: file.base64 } });
     parts.push({ text: `(filename: ${file.filename})` });
   }
-  parts.push({ text: "Extract all customer and part data from the above as JSON matching the schema." });
+  parts.push({
+    text: "Extract all customer and part data from the above as JSON matching the schema.",
+  });
 
   let result;
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt += 1) {
@@ -107,6 +110,8 @@ export async function extractFromFiles(files, emailText) {
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error("Gemini returned non-JSON output despite responseSchema - unexpected: " + text.slice(0, 200));
+    throw new Error(
+      "Gemini returned non-JSON output despite responseSchema - unexpected: " + text.slice(0, 200),
+    );
   }
 }

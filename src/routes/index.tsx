@@ -10,10 +10,12 @@ import { QuoteHistoryDialog, type QuoteRecord } from "@/components/qp/QuoteHisto
 import {
   getLocalSequence,
   advanceLocalSequence,
+  getLocalQuotes,
   setLocalSequence,
   saveLocalQuote,
   resetLocalQuoteData,
 } from "@/lib/localQuoteStore";
+import { commitQuote } from "@/lib/quoteCommit";
 import { Button } from "@/components/ui/button";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
@@ -107,26 +109,22 @@ function QuotePilot() {
     setFocusedSection("overview");
   };
 
-  // Trigger New Quote: advances sequence counter atomically (REQ-002, Section 2.1)
+  // New Quote: a number is only "used" once a quote is committed (Save Draft / CSV export / Odoo sync).
+  // So the server's next free number is the same number if nothing was committed, or +1 if it was.
   const handleNewQuote = async () => {
-    // 1. Instantly advance client local sequence
-    const nextLocal = advanceLocalSequence();
-    setDraftSequenceId(nextLocal);
-
-    // 2. Sync backend counter
     try {
-      const response = await fetch(`${apiUrl()}/api/quotes/next-sequence`, {
-        method: "POST",
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data?.draftSequenceId) {
-          setDraftSequenceId(data.draftSequenceId);
-          setLocalSequence(data.draftSequenceId);
-        }
+      const response = await fetch(`${apiUrl()}/api/quotes/current-sequence`);
+      if (!response.ok) throw new Error("sequence unavailable");
+      const data = await response.json();
+      if (data?.draftSequenceId) {
+        setDraftSequenceId(data.draftSequenceId);
+        setLocalSequence(data.draftSequenceId);
       }
     } catch (err) {
-      console.warn("Could not advance sequence counter on backend:", err);
+      console.warn("Could not read the sequence from the server:", err);
+      // Offline fallback: only move on if the current number was really committed in this browser.
+      const committed = getLocalQuotes().some((q) => q.draftSequenceId === draftSequenceId);
+      if (committed) setDraftSequenceId(advanceLocalSequence());
     }
 
     setExtraction(null);
@@ -164,35 +162,18 @@ function QuotePilot() {
   // Save Draft (retains draft sequence ID without advancing, per Section 2.1 #2)
   const handleSaveDraft = async () => {
     if (!extraction) return;
-    saveLocalQuote({
-      draftSequenceId,
-      businessUnit,
-      customerName:
-        extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
-      customerEmail: extraction.customer?.email || null,
-      sourceFile: uploadedFiles[0]?.name || "manual_draft.pdf",
-      formPayload: extraction,
-      status: "DRAFT",
-    });
-
     try {
-      await fetch(`${apiUrl()}/api/quotes/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draftSequenceId,
-          businessUnit,
-          customer: extraction.customer,
-          parts: extraction.parts,
-          sourceFile: uploadedFiles[0]?.name || "manual_draft.pdf",
-          formPayload: extraction,
-          status: "DRAFT",
-        }),
+      await commitQuote({
+        status: "DRAFT",
+        draftSequenceId,
+        businessUnit,
+        extraction,
+        sourceFile: uploadedFiles[0]?.name,
       });
       alert(`Draft ${draftSequenceId} saved successfully.`);
     } catch (err) {
       console.error("Failed to save draft on backend:", err);
-      alert(`Draft ${draftSequenceId} saved locally.`);
+      alert(`Draft ${draftSequenceId} saved in this browser only.`);
     }
   };
 
@@ -266,6 +247,9 @@ function QuotePilot() {
                 businessUnit={businessUnit}
                 onBusinessUnitChange={setBusinessUnit}
                 onViewQuote={handleRehydrateState}
+                onDuplicateDecision={(d) => {
+                  if (d.action === "revision" && d.quoteNumber) setDraftSequenceId(d.quoteNumber);
+                }}
                 onRun={(result, files) => {
                   setExtraction(result);
                   setUploadedFiles(files);
@@ -290,6 +274,7 @@ function QuotePilot() {
                 extraction={extraction}
                 uploadedFiles={uploadedFiles}
                 quoteNumber={draftSequenceId}
+                businessUnit={businessUnit}
               />
             ) : null}
 
@@ -302,18 +287,14 @@ function QuotePilot() {
                 extraction={extraction}
                 quoteNumber={draftSequenceId}
                 businessUnit={businessUnit}
-                onSyncComplete={(odooName, nextSeq) => {
+                onSyncComplete={(odooName) => {
+                  // Keep showing this quote's own number next to its Odoo number; the next number is
+                  // handed out when the operator presses New Quote.
                   setOdooOrderId(odooName);
-                  if (nextSeq) {
-                    setDraftSequenceId(nextSeq);
-                  } else {
-                    void fetch(`${apiUrl()}/api/quotes/current-sequence`)
-                      .then((r) => r.json())
-                      .then((data) => {
-                        if (data?.draftSequenceId) setDraftSequenceId(data.draftSequenceId);
-                      });
-                  }
                 }}
+                onViewQuote={(quote, payload) =>
+                  handleRehydrateState(quote as unknown as QuoteRecord, payload)
+                }
               />
             ) : null}
           </div>

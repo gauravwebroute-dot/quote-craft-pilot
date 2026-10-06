@@ -1,23 +1,26 @@
 import type { ExtractionResult } from "@/components/qp/SectionInput";
 import type { QuoteRecord } from "@/components/qp/QuoteHistoryDialog";
+import { quoteYearStr } from "@/lib/quoteYear";
 
 const STORAGE_KEY_QUOTES = "quotepilot_quotes_v1";
 const STORAGE_KEY_SEQ = "quotepilot_seq_counter_v1";
 
 function getCurrentYear(): string {
-  return new Date().getFullYear().toString().slice(-2);
+  return quoteYearStr();
 }
 
 export function getLocalSequence(): string {
   if (typeof window === "undefined") return `QP${getCurrentYear()}-0001`;
   const stored = localStorage.getItem(STORAGE_KEY_SEQ);
-  if (stored && /^QP\d{2}-\d{4}$/.test(stored)) {
+  // A stored number from an earlier year is discarded: numbering restarts at 0001 each US new year.
+  if (stored && /^QP\d{2}-\d{4}$/.test(stored) && stored.startsWith(`QP${getCurrentYear()}-`)) {
     return stored;
   }
   const quotes = getLocalQuotes();
   let maxNum = 0;
   const year = getCurrentYear();
   for (const q of quotes) {
+    if (!(q.draftSequenceId || "").startsWith(`QP${year}-`)) continue;
     const parts = (q.draftSequenceId || "").split("-");
     const num = parseInt(parts[1] || "0", 10);
     if (!isNaN(num) && num > maxNum) maxNum = num;
@@ -110,8 +113,6 @@ export function saveLocalQuote(
       : {}),
   };
 
-  const previousStatus = existingIdx >= 0 ? (quotes[existingIdx]?.status ?? null) : null;
-
   if (existingIdx >= 0) {
     quotes[existingIdx] = fullRecord;
   } else {
@@ -119,14 +120,6 @@ export function saveLocalQuote(
   }
 
   localStorage.setItem(STORAGE_KEY_QUOTES, JSON.stringify(quotes));
-
-  // Advance sequence counter if this was synced or exported
-  if (
-    (fullRecord.status === "SYNCED" || fullRecord.status === "EXCEL_EXPORTED") &&
-    previousStatus !== fullRecord.status
-  ) {
-    advanceLocalSequence();
-  }
 
   return fullRecord;
 }

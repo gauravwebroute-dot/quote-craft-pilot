@@ -27,6 +27,20 @@ export type DuplicateDrawingInfo = {
   matches?: DuplicateMatch[];
 };
 
+// Says what the operator actually did with that earlier quote.
+function statusLabel(m: DuplicateMatch): string {
+  switch (m.status) {
+    case "SYNCED":
+      return m.odooSequenceId ? `Synced to Odoo (${m.odooSequenceId})` : "Synced to Odoo";
+    case "EXCEL_EXPORTED":
+      return "Exported as CSV";
+    case "DRAFT":
+      return "Saved draft";
+    default:
+      return (m.status || "").replace(/_/g, " ").toLowerCase();
+  }
+}
+
 function formatDate(value?: string) {
   if (!value) return "";
   const d = new Date(value);
@@ -74,7 +88,8 @@ export function DuplicateDrawingDialog({
             </DialogTitle>
           </div>
           <DialogDescription className="text-sm leading-relaxed text-foreground">
-            This PDF document has already been processed.
+            This PDF was already saved as a draft, exported or synced to Odoo for this business
+            unit.
           </DialogDescription>
         </DialogHeader>
 
@@ -104,14 +119,12 @@ export function DuplicateDrawingDialog({
                     <span className="font-mono font-semibold">{m.quoteNumber}</span>
                     {m.status ? (
                       <span className="rounded bg-background px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
-                        {m.status.replace(/_/g, " ")}
+                        {statusLabel(m)}
                       </span>
                     ) : null}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {[m.customerName, formatDate(m.createdAt), m.odooSequenceId]
-                      .filter(Boolean)
-                      .join(" · ")}
+                    {[m.customerName, formatDate(m.createdAt)].filter(Boolean).join(" · ")}
                   </div>
                 </div>
                 {onViewQuote && m.id !== "latest" ? (

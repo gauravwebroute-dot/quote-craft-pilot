@@ -36,6 +36,7 @@ import { Field, KV, SubSection } from "./bits";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ExtractionResult, ExtractionPart } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import { commitQuote } from "@/lib/quoteCommit";
 
 export type PricingPartBreakdown = {
   priced: boolean;
@@ -766,7 +767,9 @@ export function SectionExtraction({
   extraction,
   uploadedFiles = [],
   quoteNumber,
+  businessUnit = "OC Custom Coating",
 }: {
+  businessUnit?: string;
   onBack: () => void;
   onContinue: () => void;
   focusedSection?: string;
@@ -841,16 +844,30 @@ export function SectionExtraction({
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const handleExportCsv = () => {
+  const handleExportCsv = async () => {
     if (!extraction?.parts?.length) return;
     const customer =
       extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
-    downloadOdooCsv(
-      extraction.parts,
-      customer,
-      pricing,
-      `${quoteNumber || "quotation"}_odoo_import.csv`,
-    );
+    try {
+      await downloadOdooCsv(
+        extraction.parts,
+        customer,
+        pricing,
+        `${quoteNumber || "quotation"}_odoo_import.csv`,
+        quoteNumber,
+      );
+      // Exporting commits the quote, exactly like exporting from the Odoo step.
+      if (quoteNumber) {
+        await commitQuote({
+          status: "EXCEL_EXPORTED",
+          draftSequenceId: quoteNumber,
+          businessUnit,
+          extraction,
+        });
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "CSV export failed.");
+    }
   };
 
   // Determine active part if focused on a specific part ID

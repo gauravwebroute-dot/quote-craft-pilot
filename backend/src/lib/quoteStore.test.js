@@ -27,13 +27,13 @@ test('PRD v3.0: quote store schema, line items, and dynamic sequence lifecycle',
     pdfHash: 'hash-abc-123',
     sourceFile: '117_0018_001_C.pdf',
     formPayload: { customField: 'test' },
-    status: 'EXTRACTED',
+    status: 'DRAFT',
   });
 
   assert.equal(quote1.draftSequenceId, initialDraft);
   assert.equal(quote1.duplicate, false);
 
-  // 3. Duplicate detection on identical PDF hash
+  // 3. Duplicate detection on identical PDF hash (only committed quotes: draft / exported / synced count)
   const dupCheck = store.findDuplicateQuote('hash-abc-123');
   assert.ok(dupCheck);
   assert.equal(dupCheck.draftSequenceId, initialDraft);

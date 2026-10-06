@@ -1,33 +1,37 @@
-import { Router } from 'express';
-import { defaultQuoteStore, hashPayload } from '../lib/quoteStore.js';
-import { searchLiveOdooQuotes, getLiveOdooQuoteDetails } from '../services/odooCrossCheck.js';
+import { Router } from "express";
+import { defaultQuoteStore, hashPayload } from "../lib/quoteStore.js";
+import { searchLiveOdooQuotes, getLiveOdooQuoteDetails } from "../services/odooCrossCheck.js";
 
 const router = Router();
 
 // GET current active draft sequence ID (e.g. "QP26-0001")
-router.get('/quotes/current-sequence', async (_req, res) => {
+router.get("/quotes/current-sequence", async (_req, res) => {
   try {
     const draftSequenceId = await defaultQuoteStore.getCurrentDraftSequenceId();
     return res.json({ draftSequenceId });
   } catch (error) {
-    console.error('[GET /api/quotes/current-sequence] failed:', error);
-    return res.status(500).json({ error: 'SEQUENCE_FETCH_FAILED', message: 'Could not fetch current draft sequence.' });
+    console.error("[GET /api/quotes/current-sequence] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "SEQUENCE_FETCH_FAILED", message: "Could not fetch current draft sequence." });
   }
 });
 
 // POST advance sequence counter (e.g. when user clicks "New Quote" after a terminal action)
-router.post('/quotes/next-sequence', async (_req, res) => {
+router.post("/quotes/next-sequence", async (_req, res) => {
   try {
     const draftSequenceId = await defaultQuoteStore.advanceSequenceCounter();
     return res.json({ draftSequenceId });
   } catch (error) {
-    console.error('[POST /api/quotes/next-sequence] failed:', error);
-    return res.status(500).json({ error: 'SEQUENCE_INCREMENT_FAILED', message: 'Could not advance sequence counter.' });
+    console.error("[POST /api/quotes/next-sequence] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "SEQUENCE_INCREMENT_FAILED", message: "Could not advance sequence counter." });
   }
 });
 
 // Duplicate PDF / Drawing Check (REQ-003, REQ-004)
-router.post('/quotes/duplicate-check', async (req, res) => {
+router.post("/quotes/duplicate-check", async (req, res) => {
   try {
     const { pdfHash, sourceFile, customer, parts, businessUnit } = req.body ?? {};
     const hash = pdfHash || hashPayload({ customer, parts, sourceFile });
@@ -50,26 +54,28 @@ router.post('/quotes/duplicate-check', async (req, res) => {
       warning: `This PDF document has already been processed under Quote #${duplicate.draftSequenceId} (Customer: ${duplicate.customerName}).`,
     });
   } catch (error) {
-    console.error('[POST /api/quotes/duplicate-check] failed:', error);
-    return res.status(500).json({ error: 'DUPLICATE_CHECK_FAILED', message: 'Duplicate check failed.' });
+    console.error("[POST /api/quotes/duplicate-check] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "DUPLICATE_CHECK_FAILED", message: "Duplicate check failed." });
   }
 });
 
 // Save or Update Quote (REQ-001, REQ-002)
-router.post('/quotes/save', async (req, res) => {
+router.post("/quotes/save", async (req, res) => {
   try {
     const {
       draftSequenceId,
       quoteNumber,
       odooSequenceId,
-      businessUnit = 'OC Custom Coating',
+      businessUnit = "OC Custom Coating",
       customer,
       parts,
       pdfHash,
       sourceFile,
       payload,
       formPayload,
-      status = 'DRAFT',
+      status = "DRAFT",
       forceNewQuote = false,
     } = req.body ?? {};
 
@@ -93,13 +99,15 @@ router.post('/quotes/save', async (req, res) => {
       quoteId: result.id,
     });
   } catch (error) {
-    console.error('[POST /api/quotes/save] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_SAVE_FAILED', message: 'Could not save the quote history.' });
+    console.error("[POST /api/quotes/save] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_SAVE_FAILED", message: "Could not save the quote history." });
   }
 });
 
 // Terminal Action Handler: Mode A (Odoo Sync) or Mode B (Excel Export) (REQ-002)
-router.post('/quotes/terminal-action', async (req, res) => {
+router.post("/quotes/terminal-action", async (req, res) => {
   try {
     const {
       quoteId,
@@ -109,25 +117,32 @@ router.post('/quotes/terminal-action', async (req, res) => {
       customer,
       parts,
       formPayload,
-      businessUnit = 'OC Custom Coating',
+      pdfHash,
+      sourceFile,
+      businessUnit = "OC Custom Coating",
     } = req.body ?? {};
     const identifier = quoteId || draftSequenceId;
     if (!identifier) {
-      return res.status(400).json({ error: 'MISSING_IDENTIFIER', message: 'quoteId or draftSequenceId required.' });
+      return res
+        .status(400)
+        .json({ error: "MISSING_IDENTIFIER", message: "quoteId or draftSequenceId required." });
     }
 
-    const validActions = ['ODOO_SYNC', 'EXCEL_EXPORT', 'CROSS_CHECK'];
+    const validActions = ["ODOO_SYNC", "EXCEL_EXPORT", "CROSS_CHECK"];
     if (!validActions.includes(action)) {
-      return res.status(400).json({ error: 'INVALID_ACTION', message: `action must be one of ${validActions.join(', ')}.` });
+      return res.status(400).json({
+        error: "INVALID_ACTION",
+        message: `action must be one of ${validActions.join(", ")}.`,
+      });
     }
 
-    let status = 'DRAFT';
-    if (action === 'ODOO_SYNC') {
-      status = 'SYNCED';
-    } else if (action === 'EXCEL_EXPORT') {
-      status = 'EXCEL_EXPORTED';
-    } else if (action === 'CROSS_CHECK') {
-      status = 'CROSS_CHECKED';
+    let status = "DRAFT";
+    if (action === "ODOO_SYNC") {
+      status = "SYNCED";
+    } else if (action === "EXCEL_EXPORT") {
+      status = "EXCEL_EXPORTED";
+    } else if (action === "CROSS_CHECK") {
+      status = "CROSS_CHECKED";
     }
 
     const existing = await defaultQuoteStore.getQuoteById(identifier);
@@ -139,6 +154,8 @@ router.post('/quotes/terminal-action', async (req, res) => {
         customer,
         parts,
         formPayload,
+        pdfHash: pdfHash || formPayload?.pdfHash || null,
+        sourceFile: sourceFile || formPayload?.sourceFile || null,
         status,
         forceNewQuote: true,
       });
@@ -149,8 +166,9 @@ router.post('/quotes/terminal-action', async (req, res) => {
       });
     }
 
-    // Advance sequence counter for the next new quote (REQ-002, Section 2.1)
-    const nextDraftSequenceId = await defaultQuoteStore.advanceSequenceCounter();
+    // The number was already consumed when this quote was committed (recordQuote). A terminal action
+    // must NOT consume another one - that is what made QP26-0001 jump to QP26-0003. Only peek.
+    const nextDraftSequenceId = await defaultQuoteStore.getCurrentDraftSequenceId();
 
     return res.json({
       success: true,
@@ -160,29 +178,33 @@ router.post('/quotes/terminal-action', async (req, res) => {
       message: `Quote status updated to ${status}. Next draft sequence is ${nextDraftSequenceId}.`,
     });
   } catch (error) {
-    console.error('[POST /api/quotes/terminal-action] failed:', error);
-    return res.status(500).json({ error: 'TERMINAL_ACTION_FAILED', message: 'Could not record terminal action.' });
+    console.error("[POST /api/quotes/terminal-action] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "TERMINAL_ACTION_FAILED", message: "Could not record terminal action." });
   }
 });
 
 // Quote History (REQ-009)
-router.get('/quotes/history', async (_req, res) => {
+router.get("/quotes/history", async (_req, res) => {
   try {
     return res.json({ quotes: await defaultQuoteStore.getHistory() });
   } catch (error) {
-    console.error('[GET /api/quotes/history] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_HISTORY_FAILED', message: 'Could not load quote history.' });
+    console.error("[GET /api/quotes/history] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_HISTORY_FAILED", message: "Could not load quote history." });
   }
 });
 
 // Dual-Source Search Engine (Local SQLite + Live Odoo ERP) (REQ-009)
-router.get('/quotes/search', async (req, res) => {
+router.get("/quotes/search", async (req, res) => {
   try {
-    const query = String(req.query?.q ?? '').trim();
-    const businessUnit = String(req.query?.businessUnit ?? '').trim();
-    const status = String(req.query?.status ?? '').trim();
-    const startDate = String(req.query?.startDate ?? '').trim();
-    const endDate = String(req.query?.endDate ?? '').trim();
+    const query = String(req.query?.q ?? "").trim();
+    const businessUnit = String(req.query?.businessUnit ?? "").trim();
+    const status = String(req.query?.status ?? "").trim();
+    const startDate = String(req.query?.startDate ?? "").trim();
+    const endDate = String(req.query?.endDate ?? "").trim();
 
     // Source 1: Local store (Supabase or SQLite)
     const localQuotes = await defaultQuoteStore.searchQuotes({
@@ -204,7 +226,7 @@ router.get('/quotes/search', async (req, res) => {
         endDate,
       });
     } catch (odooSearchErr) {
-      console.warn('Odoo live search fallback:', odooSearchErr.message);
+      console.warn("Odoo live search fallback:", odooSearchErr.message);
     }
 
     // Merge and deduplicate dual sources
@@ -229,18 +251,20 @@ router.get('/quotes/search', async (req, res) => {
     }
 
     const quotes = Array.from(mergedMap.values()).sort(
-      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
     );
 
     return res.json({ quotes });
   } catch (error) {
-    console.error('[GET /api/quotes/search] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_SEARCH_FAILED', message: 'Could not search the quote history.' });
+    console.error("[GET /api/quotes/search] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_SEARCH_FAILED", message: "Could not search the quote history." });
   }
 });
 
 // Get Single Quote by ID, Draft Sequence ID, or Odoo Sequence ID (For State Rehydration)
-router.get('/quotes/:id', async (req, res) => {
+router.get("/quotes/:id", async (req, res) => {
   try {
     const { id } = req.params;
     let quote = await defaultQuoteStore.getQuoteById(id);
@@ -251,69 +275,84 @@ router.get('/quotes/:id', async (req, res) => {
     }
 
     if (!quote) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Quote not found.' });
+      return res.status(404).json({ error: "NOT_FOUND", message: "Quote not found." });
     }
     return res.json({ quote });
   } catch (error) {
-    console.error('[GET /api/quotes/:id] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_FETCH_FAILED', message: 'Could not load quote details.' });
+    console.error("[GET /api/quotes/:id] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_FETCH_FAILED", message: "Could not load quote details." });
   }
 });
 
 // Reset: wipes every saved quote in the app database and restarts numbering at QPyy-0001.
 // Requires the exact confirmation phrase. Never touches Odoo.
-router.post('/quotes/reset', async (req, res) => {
+router.post("/quotes/reset", async (req, res) => {
   try {
-    if (process.env.ALLOW_QUOTE_RESET === 'false') {
-      return res.status(403).json({ error: 'RESET_DISABLED', message: 'Reset is disabled on this server.' });
+    if (process.env.ALLOW_QUOTE_RESET === "false") {
+      return res
+        .status(403)
+        .json({ error: "RESET_DISABLED", message: "Reset is disabled on this server." });
     }
-    if (req.body?.confirm !== 'RESET') {
-      return res.status(400).json({ error: 'CONFIRMATION_REQUIRED', message: 'Send confirm: "RESET" to wipe all quotes.' });
+    if (req.body?.confirm !== "RESET") {
+      return res.status(400).json({
+        error: "CONFIRMATION_REQUIRED",
+        message: 'Send confirm: "RESET" to wipe all quotes.',
+      });
     }
     const result = await defaultQuoteStore.resetAllQuotes();
     return res.json({ success: true, ...result });
   } catch (error) {
-    console.error('[POST /api/quotes/reset] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_RESET_FAILED', message: 'Could not reset quotes.' });
+    console.error("[POST /api/quotes/reset] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_RESET_FAILED", message: "Could not reset quotes." });
   }
 });
 
 // Delete Quote
-router.delete('/quotes/:id', async (req, res) => {
+router.delete("/quotes/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const businessUnit = String(req.query?.businessUnit ?? '').trim() || null;
+    const businessUnit = String(req.query?.businessUnit ?? "").trim() || null;
     const deleted = await defaultQuoteStore.deleteQuote(id, businessUnit);
     return res.json({ success: deleted });
   } catch (error) {
-    console.error('[DELETE /api/quotes/:id] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_DELETE_FAILED', message: 'Could not delete quote.' });
+    console.error("[DELETE /api/quotes/:id] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_DELETE_FAILED", message: "Could not delete quote." });
   }
 });
 
 // Get Quote Revisions
-router.get('/quotes/:quoteId/revisions', async (req, res) => {
+router.get("/quotes/:quoteId/revisions", async (req, res) => {
   try {
     const { quoteId } = req.params;
     return res.json({ quoteId, revisions: await defaultQuoteStore.getRevisions(quoteId) });
   } catch (error) {
-    console.error('[GET /api/quotes/:quoteId/revisions] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_REVISION_FAILED', message: 'Could not load quote revisions.' });
+    console.error("[GET /api/quotes/:quoteId/revisions] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_REVISION_FAILED", message: "Could not load quote revisions." });
   }
 });
 
 // CSV/Excel Export (REQ-002, Mode B)
-router.post('/quotes/export', async (req, res) => {
+router.post("/quotes/export", async (req, res) => {
   try {
     const { quoteNumber, customer, parts } = req.body ?? {};
     const csv = defaultQuoteStore.buildCsv({ quoteNumber, customer, parts });
-    const safeName = String(quoteNumber || 'quote').replace(/[^a-zA-Z0-9_-]+/g, '_');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}_odoo_import.csv"`);
+    const safeName = String(quoteNumber || "quote").replace(/[^a-zA-Z0-9_-]+/g, "_");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}_odoo_import.csv"`);
     return res.send(csv);
   } catch (error) {
-    console.error('[POST /api/quotes/export] failed:', error);
-    return res.status(500).json({ error: 'QUOTE_EXPORT_FAILED', message: 'Could not generate the Excel export.' });
+    console.error("[POST /api/quotes/export] failed:", error);
+    return res
+      .status(500)
+      .json({ error: "QUOTE_EXPORT_FAILED", message: "Could not generate the Excel export." });
   }
 });
 

@@ -35,6 +35,7 @@ import {
   Check,
   AlertCircle,
   Clock,
+  Eye,
   ShieldCheck,
   Lock,
   History,
@@ -44,7 +45,7 @@ import {
 import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
-import { saveLocalQuote, advanceLocalSequence } from "@/lib/localQuoteStore";
+import { commitQuote } from "@/lib/quoteCommit";
 
 export type PriorQuoteDetail = {
   id?: number;
@@ -60,6 +61,9 @@ export type PriorQuoteDetail = {
   unitPrice: number;
   lineTotal: number;
   quoteTotal: number;
+  /** How this earlier quote was created (synced from QuotePilot, CSV import, directly in Odoo...). */
+  sourceLabel?: string | null;
+  clientRef?: string | null;
 };
 
 type PartCrossCheck = {
@@ -147,12 +151,15 @@ export function SectionOdoo({
   businessUnit = "OC Custom Coating",
   onSyncComplete,
   onRehydrateQuote,
+  onViewQuote,
 }: {
+  /** Opens an earlier quote (full extracted data, specs and price breakdown) in the app. */
+  onViewQuote?: (quote: Record<string, unknown>, payload: ExtractionResult) => void;
   onBack: () => void;
   extraction?: ExtractionResult | null;
   quoteNumber?: string;
   businessUnit?: string;
-  onSyncComplete?: (odooOrderName: string, nextDraftSeq?: string) => void;
+  onSyncComplete?: (odooOrderName: string) => void;
   onRehydrateQuote?: (payload: ExtractionResult) => void;
 }) {
   const [crossCheck, setCrossCheck] = useState<CrossCheckResult | null>(null);
@@ -234,42 +241,30 @@ export function SectionOdoo({
       return true;
     });
 
-  const handleDownloadCsv = () => {
+  const handleDownloadCsv = async () => {
     if (!extraction?.parts?.length) return;
     const customer =
       extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
-    downloadOdooCsv(
-      extraction.parts,
-      customer,
-      null,
-      `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`,
-    );
-
-    // 1. Save locally
-    if (quoteNumber) {
-      saveLocalQuote({
-        draftSequenceId: quoteNumber,
-        status: "EXCEL_EXPORTED",
-        customerName: customer,
-        businessUnit,
-        formPayload: extraction,
-      });
-      advanceLocalSequence();
+    try {
+      await downloadOdooCsv(
+        extraction.parts,
+        customer,
+        null,
+        `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`,
+        quoteNumber,
+      );
+      // Exporting commits the quote (number is used, same-PDF reminder starts working).
+      if (quoteNumber) {
+        await commitQuote({
+          status: "EXCEL_EXPORTED",
+          draftSequenceId: quoteNumber,
+          businessUnit,
+          extraction,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "CSV export failed.");
     }
-
-    // 2. Record terminal export action (Mode B) with full payload preservation
-    void fetch(`${apiUrl()}/api/quotes/terminal-action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        draftSequenceId: quoteNumber,
-        action: "EXCEL_EXPORT",
-        businessUnit,
-        customer: extraction.customer,
-        parts: extraction.parts,
-        formPayload: extraction,
-      }),
-    });
   };
 
   const handleSyncToOdooAll = async () => {
@@ -291,41 +286,27 @@ export function SectionOdoo({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to create Odoo quotation.");
 
-      const createdOrderName =
-        payload.created?.saleOrderName || `S000${Math.floor(Math.random() * 900) + 42}`;
+      // Never invent an order number: if Odoo did not return one, nothing was created.
+      const createdOrderName: string | undefined = payload.created?.saleOrderName;
+      if (!createdOrderName) {
+        throw new Error(
+          payload.message ||
+            "Odoo did not return a quotation number - nothing was created in Odoo.",
+        );
+      }
       setSyncedOrder(createdOrderName);
 
-      // 1. Save to local browser storage immediately
-      const nextSeq = advanceLocalSequence();
+      // Commit once: browser copy + database copy, status SYNCED. Numbering advances exactly once.
       if (quoteNumber) {
-        saveLocalQuote({
-          draftSequenceId: quoteNumber,
-          odooSequenceId: createdOrderName,
+        await commitQuote({
           status: "SYNCED",
-          customerName:
-            extraction.customer?.company || extraction.customer?.contact || "Standard Customer",
+          draftSequenceId: quoteNumber,
           businessUnit,
-          formPayload: extraction,
+          extraction,
+          odooSequenceId: createdOrderName,
         });
       }
-
-      // 2. Inform parent / advance sequence (Mode A)
-      onSyncComplete?.(createdOrderName, nextSeq);
-
-      // 3. Record terminal sync on backend
-      void fetch(`${apiUrl()}/api/quotes/terminal-action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draftSequenceId: quoteNumber,
-          odooSequenceId: createdOrderName,
-          action: "ODOO_SYNC",
-          businessUnit,
-          customer: extraction.customer,
-          parts: extraction.parts,
-          formPayload: extraction,
-        }),
-      });
+      onSyncComplete?.(createdOrderName);
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : "Failed to create Odoo quotation.",
@@ -368,6 +349,20 @@ export function SectionOdoo({
       }));
     } finally {
       setCreatingPart(null);
+    }
+  };
+
+  // Opens an earlier quote (by its Odoo order name) with all its extracted data, specs and pricing.
+  const handleViewEarlierQuote = async (orderName: string) => {
+    try {
+      const response = await fetch(`${apiUrl()}/api/quotes/${encodeURIComponent(orderName)}`);
+      if (!response.ok) throw new Error("Could not load that quote.");
+      const data = await response.json();
+      if (!data.quote?.formPayload) throw new Error("That quote has no saved details to show.");
+      setPriceHistoryOpen(false);
+      onViewQuote?.(data.quote, data.quote.formPayload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open that quote.");
     }
   };
 
@@ -840,23 +835,7 @@ export function SectionOdoo({
                 const diffPct = prevPrice > 0 ? ((diff / prevPrice) * 100).toFixed(1) : "0.0";
                 const isHigher = diff > 0;
                 const quotesList =
-                  part.priorQuotes && part.priorQuotes.length > 0
-                    ? part.priorQuotes
-                    : [
-                        {
-                          id: 1,
-                          quoteName: part.previousQuote?.saleOrderName || "S00075",
-                          date: part.previousQuote?.quotedAt || "05 Oct 2026",
-                          status: "Quotation",
-                          revision: part.previousQuote?.revision || part.revision || "C00",
-                          quantity: 3,
-                          areaSqIn: 184,
-                          pricePerSi: 0.4,
-                          unitPrice: prevPrice || 5.0,
-                          lineTotal: (prevPrice || 5.0) * 3,
-                          quoteTotal: (prevPrice || 5.0) * 3,
-                        },
-                      ];
+                  part.priorQuotes && part.priorQuotes.length > 0 ? part.priorQuotes : [];
 
                 return (
                   <div
@@ -867,7 +846,7 @@ export function SectionOdoo({
                     <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-base font-mono">
-                          {part.partNumber || "117-0018-001"}
+                          {part.partNumber || "—"}
                         </span>
                         <Badge variant="secondary" className="font-mono text-xs">
                           Rev {part.revision || "C00"}
@@ -882,7 +861,7 @@ export function SectionOdoo({
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-card p-3.5 rounded-lg border border-border">
                       <div>
                         <span className="text-xs text-muted-foreground block">
-                          Last quoted ({part.previousQuote?.quotedAt || "05 Oct 2026"})
+                          Last quoted ({part.previousQuote?.quotedAt || "—"})
                         </span>
                         <div className="mt-1">
                           <span className="text-2xl font-bold font-mono text-foreground">
@@ -891,9 +870,7 @@ export function SectionOdoo({
                         </div>
                         <span className="text-[11px] text-muted-foreground">
                           per unit ·{" "}
-                          {part.previousQuote?.saleOrderName ||
-                            quotesList[0]?.quoteName ||
-                            "S00075"}
+                          {part.previousQuote?.saleOrderName || quotesList[0]?.quoteName || "—"}
                         </span>
                       </div>
 
@@ -945,6 +922,7 @@ export function SectionOdoo({
                             <th className="px-3 py-2.5 font-medium text-right">Unit price</th>
                             <th className="px-3 py-2.5 font-medium text-right">Line total</th>
                             <th className="px-3 py-2.5 font-medium text-right">Quote total</th>
+                            <th className="px-3 py-2.5 font-medium text-center">View</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border bg-card font-mono">
@@ -952,6 +930,11 @@ export function SectionOdoo({
                             <tr key={q.id || qIdx} className="hover:bg-muted/40 transition-colors">
                               <td className="px-3 py-2 font-semibold text-foreground">
                                 {q.quoteName}
+                                {q.sourceLabel ? (
+                                  <div className="font-sans text-[10px] font-normal text-muted-foreground">
+                                    {q.sourceLabel}
+                                  </div>
+                                ) : null}
                               </td>
                               <td className="px-3 py-2 text-muted-foreground">{q.date}</td>
                               <td className="px-3 py-2 font-sans">
@@ -978,6 +961,21 @@ export function SectionOdoo({
                               </td>
                               <td className="px-3 py-2 text-right font-medium text-foreground">
                                 {money(q.quoteTotal)}
+                              </td>
+                              <td className="px-3 py-2 text-center font-sans">
+                                {onViewQuote ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-7"
+                                    title="View full extracted data, specs and price breakdown of this quote"
+                                    aria-label={`View ${q.quoteName}`}
+                                    onClick={() => void handleViewEarlierQuote(q.quoteName)}
+                                  >
+                                    <Eye className="size-4" />
+                                  </Button>
+                                ) : null}
                               </td>
                             </tr>
                           ))}

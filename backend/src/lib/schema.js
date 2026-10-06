@@ -178,6 +178,20 @@ export const EXTRACTION_TOOL = {
                 dedupCompositeKey: { type: ["string", "null"], description: "cleanCompanyName + cleanPartNumber" },
               },
             },
+            companyName: { type: ["string", "null"], description: "Client / vendor / owning company from the title block, header or proprietary notice." },
+            hasDimensions: { type: ["boolean", "null"], description: "True only if dimensions/tolerances are present on the drawing." },
+            fileType: { type: ["string", "null"], enum: ["PDF", "CAD_DRAWING", "IMAGE", null] },
+            finish: { type: ["string", "null"], description: "Finish as written (e.g. CARC, anodized), or null if not stated." },
+            technicalNotes: { type: ["array", "null"], items: { type: "string" }, description: "Process / engineering notes copied from the drawing." },
+            dedupKeys: {
+              type: ["object", "null"],
+              description: "Normalized UPPERCASE keys with all spaces, dashes, dots and special characters removed.",
+              properties: {
+                cleanPartNumber: { type: ["string", "null"] },
+                cleanCompanyName: { type: ["string", "null"] },
+                dedupCompositeKey: { type: ["string", "null"], description: "cleanCompanyName + cleanPartNumber" },
+              },
+            },
           },
           required: [
             "partNumber", "partName", "partSummary", "revision", "isAssembly", "existingCoating",

@@ -57,23 +57,32 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
         const resolvedReasoning = part.reasoningSummary || areaResult.reasoningSummary;
 
         // Deterministic surface, masking & coating area enforcement (PRD v2 Item 1)
-        const totalSurfaceArea = typeof resolvedArea === "number" && !isNaN(resolvedArea) ? resolvedArea : 0;
+        const totalSurfaceArea =
+          typeof resolvedArea === "number" && !isNaN(resolvedArea) ? resolvedArea : 0;
         const rawMasking = part.maskingAreaSqIn != null ? Number(part.maskingAreaSqIn) : 0;
-        const maskingAreaSqIn = isNaN(rawMasking) || rawMasking < 0 ? 0 : Math.min(rawMasking, totalSurfaceArea);
-        const coatingAreaSqIn = Math.max(0, Math.min(totalSurfaceArea, Math.round((totalSurfaceArea - maskingAreaSqIn) * 100) / 100));
+        const maskingAreaSqIn =
+          isNaN(rawMasking) || rawMasking < 0 ? 0 : Math.min(rawMasking, totalSurfaceArea);
+        const coatingAreaSqIn = Math.max(
+          0,
+          Math.min(totalSurfaceArea, Math.round((totalSurfaceArea - maskingAreaSqIn) * 100) / 100),
+        );
 
         // 2. Coating Detection & Negation Handling
-        const searchScope = `${emailText} ${part.partSummary || ""} ${JSON.stringify(part.coatingBom || {})}`.toUpperCase();
+        const searchScope =
+          `${emailText} ${part.partSummary || ""} ${JSON.stringify(part.coatingBom || {})}`.toUpperCase();
         const hasExplicitNegation =
-          /NO COATING REQUIRED|UNCOATED|BARE METAL\s*[-—]\s*NO FINISH|NO FINISH REQUIRED/.test(searchScope);
+          /NO COATING REQUIRED|UNCOATED|BARE METAL\s*[-—]\s*NO FINISH|NO FINISH REQUIRED/.test(
+            searchScope,
+          );
 
         let coatingPresent = part.coatingPresent;
         if (hasExplicitNegation) {
           coatingPresent = false;
         } else {
           const hasCoatingSpec =
-            /COAT|COATING|PRIMER|CARC|POWDER\s*COAT|PAINT|ANODIZE|PLATING|FINISH|MIL-DTL|MIL-PRF|MIL-C/.test(searchScope) ||
-            Boolean(part.coatingBom?.topcoat || part.coatingBom?.primer);
+            /COAT|COATING|PRIMER|CARC|POWDER\s*COAT|PAINT|ANODIZE|PLATING|FINISH|MIL-DTL|MIL-PRF|MIL-C/.test(
+              searchScope,
+            ) || Boolean(part.coatingBom?.topcoat || part.coatingBom?.primer);
           if (hasCoatingSpec) {
             coatingPresent = true;
           }
@@ -90,7 +99,11 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
         let partNumber = part.partNumber?.trim() || null;
         let isProvisional = part.isProvisional || false;
         if (part.isAssembly && (!partNumber || /unknown|none/i.test(partNumber))) {
-          if (Array.isArray(part.bomItems) && part.bomItems.length > 0 && part.bomItems[0].partNumber) {
+          if (
+            Array.isArray(part.bomItems) &&
+            part.bomItems.length > 0 &&
+            part.bomItems[0].partNumber
+          ) {
             partNumber = part.bomItems[0].partNumber;
             isProvisional = true;
           } else {
@@ -100,10 +113,15 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
         }
 
         // 3b. Identity normalization + deterministic dedup keys (never trust the model's keys)
-        const cleanKey = (v) => String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const cleanKey = (v) =>
+          String(v ?? "")
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, "");
         const rawRev = typeof part.revision === "string" ? part.revision.trim() : "";
-        const revision = !rawRev || /^(not[_ ]?specified|unknown|none|n\/a|null)$/i.test(rawRev) ? "0" : rawRev;
-        const companyName = (part.companyName?.trim() || extraction.customer?.company?.trim() || null);
+        const revision =
+          !rawRev || /^(not[_ ]?specified|unknown|none|n\/a|null)$/i.test(rawRev) ? "0" : rawRev;
+        const companyName =
+          part.companyName?.trim() || extraction.customer?.company?.trim() || null;
         const dedupKeys = {
           cleanPartNumber: cleanKey(partNumber),
           cleanCompanyName: cleanKey(companyName),
@@ -114,7 +132,9 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
         const material = part.material?.trim() || "NOT_SPECIFIED";
         const prepType = part.prepType?.trim() || "NOT_SPECIFIED";
         const existingCoating = part.existingCoating?.trim() || "NOT_SPECIFIED";
-        const partMarkSpec = part.partMark ? (part.partMarkSpec?.trim() || "Per drawing spec") : "NOT_SPECIFIED";
+        const partMarkSpec = part.partMark
+          ? part.partMarkSpec?.trim() || "Per drawing spec"
+          : "NOT_SPECIFIED";
 
         return {
           ...part,

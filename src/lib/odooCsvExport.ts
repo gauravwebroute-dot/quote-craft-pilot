@@ -1,5 +1,6 @@
 import type { ExtractionPart } from "@/components/qp/SectionInput";
 import type { PricingResponse } from "@/components/qp/SectionExtraction";
+import { apiBaseUrl } from "@/lib/businessUnits";
 
 /**
  * Maps QuotePilot extracted + priced parts to Odoo Sales Import CSV format (PRD v2 Item 6).
@@ -34,12 +35,19 @@ export function mapQuotePilotToOdooCsv(
   extractedParts: ExtractionPart[],
   customerName?: string | null,
   pricing?: PricingResponse | null,
+  quoteNumber?: string | null,
 ): OdooCsvRow[] {
   const customer = customerName?.trim() || "Standard Customer";
 
   return extractedParts.map((part, index) => {
     const priced = pricing?.results?.[index];
-    const unitPrice = priced?.pricePerUnit ?? 5.0;
+    // Never fall back to a made-up price: that is what produced "$30 = 6 x $5" quotes in Odoo.
+    if (typeof priced?.pricePerUnit !== "number") {
+      throw new Error(
+        `No calculated price for line ${index + 1} - cannot export a CSV with a made-up price.`,
+      );
+    }
+    const unitPrice = priced.pricePerUnit;
     const totalArea = Number(part.totalSurfaceAreaSqIn) || 0;
     const rawMasking = Number(part.maskingAreaSqIn) || 0;
     const maskingSqIn = Math.min(rawMasking, totalArea);
@@ -68,11 +76,13 @@ export function mapQuotePilotToOdooCsv(
     const extra = part as { milSpecNotes?: string; specifications?: string };
     const specs = extra.milSpecNotes || extra.specifications;
     const specText = specs ? ` | Specs: ${specs}` : "";
-    const fullDescription = `${baseName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} +temp test`;
+    const displayName =
+      partNumber && baseName !== partNumber ? `${partNumber} - ${baseName}` : baseName;
+    const fullDescription = `${displayName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} +temp test`;
 
     return {
       Customer: customer,
-      "Customer Reference": partNumber,
+      "Customer Reference": quoteNumber || partNumber,
       "Order Lines/Products": partNumber,
       "Order Lines/Description": fullDescription,
       "Order Lines/x_rev": rev,
@@ -114,13 +124,27 @@ export function generateOdooCsvString(rows: OdooCsvRow[]): string {
   return [headerLine, ...dataLines].join("\r\n");
 }
 
-export function downloadOdooCsv(
+async function fetchPricing(parts: ExtractionPart[]): Promise<PricingResponse> {
+  const response = await fetch(`${apiBaseUrl()}/api/price`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parts, adjustments: { chemFilm: false } }),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.message || "Pricing calculation failed.");
+  return payload as PricingResponse;
+}
+
+/** Builds and downloads the Odoo import CSV. When no pricing is passed it is calculated first. */
+export async function downloadOdooCsv(
   extractedParts: ExtractionPart[],
   customerName?: string | null,
   pricing?: PricingResponse | null,
   filename?: string,
+  quoteNumber?: string | null,
 ) {
-  const rows = mapQuotePilotToOdooCsv(extractedParts, customerName, pricing);
+  const priced = pricing ?? (await fetchPricing(extractedParts));
+  const rows = mapQuotePilotToOdooCsv(extractedParts, customerName, priced, quoteNumber);
   const csvContent = generateOdooCsvString(rows);
 
   const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });

@@ -16,6 +16,7 @@ import { DuplicateDrawingDialog, type DuplicateMatch } from "./DuplicateDrawingD
 import { FileText, Upload, X, ArrowRight, Eye, RefreshCw, Sparkles } from "lucide-react";
 import type { QuoteRecord } from "./QuoteHistoryDialog";
 import { getLocalQuotes } from "@/lib/localQuoteStore";
+import { useBusinessUnits } from "@/lib/businessUnits";
 
 function apiBase() {
   return (
@@ -83,6 +84,11 @@ export type ExtractionResult = {
   customer: Record<string, string | null>;
   parts: ExtractionPart[];
   extractionNotes: string[];
+  /** SHA-256 of the uploaded PDF(s); lets us recognise the same drawing uploaded again. */
+  pdfHash?: string | undefined;
+  sourceFile?: string | undefined;
+  /** Decision taken in the duplicate-PDF popup, if any. */
+  duplicateAction?: "revision" | "new" | null | undefined;
 };
 
 export type ModelOption = {
@@ -159,7 +165,9 @@ export function SectionInput({
   businessUnit = "OC Custom Coating",
   onBusinessUnitChange,
   onViewQuote,
+  onDuplicateDecision,
 }: {
+  onDuplicateDecision?: (decision: { action: "revision" | "new"; quoteNumber?: string }) => void;
   onViewQuote?: (quote: QuoteRecord, payload: ExtractionResult) => void;
   onRun: (
     extraction: ExtractionResult,
@@ -184,9 +192,16 @@ export function SectionInput({
   // Duplicate Warning Modal State (REQ-003, REQ-004)
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [duplicateData, setDuplicateData] = useState<DuplicateInfo | null>(null);
-  const [pendingExtractionPayload, setPendingExtractionPayload] = useState<ExtractionResult | null>(
-    null,
-  );
+  // Decision taken in the duplicate popup. Choosing an option NEVER starts extraction: the operator
+  // still picks the business unit and presses "RUN Extraction" themselves.
+  const [duplicateDecision, setDuplicateDecision] = useState<{
+    action: "revision" | "new";
+    bu: string;
+    quoteNumber: string;
+  } | null>(null);
+  const activeDecision =
+    duplicateDecision && duplicateDecision.bu === selectedBU ? duplicateDecision : null;
+  const businessUnits = useBusinessUnits(selectedBU);
 
   // Fetch dynamic models from OpenRouter endpoint on mount
   useEffect(() => {
@@ -257,6 +272,7 @@ export function SectionInput({
     );
     const newFiles = [...uploadedFiles, ...validFiles].slice(0, 10);
     setUploadedFiles(newFiles);
+    setDuplicateDecision(null);
 
     // Pre-check duplicate on file upload
     if (newFiles.length > 0) {
@@ -298,72 +314,49 @@ export function SectionInput({
     window.open(URL.createObjectURL(file), "_blank", "noopener,noreferrer");
   };
 
-  const executeExtraction = async (forceNewQuote = false) => {
+  const executeExtraction = async () => {
     setError(null);
     setIsExtracting(true);
     try {
+      const apiUrl = apiBase();
+      const pdfHash = await computePdfHash(uploadedFiles);
+      const sourceFile = uploadedFiles[0]?.name || "unknown.pdf";
+
+      // 1. Duplicate check BEFORE spending an extraction. It looks only at quotes the operator committed
+      //    (saved draft / exported / synced) in the business unit selected right now.
+      if (pdfHash && !activeDecision) {
+        const duplicateResponse = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdfHash, businessUnit: selectedBU, sourceFile }),
+        });
+        if (duplicateResponse.ok) {
+          const duplicatePayload = await duplicateResponse.json();
+          if (duplicatePayload.duplicate) {
+            setDuplicateData(toDuplicateInfo(duplicatePayload));
+            setDuplicateModalOpen(true);
+            return;
+          }
+        }
+      }
+
+      // 2. Extract. Nothing is saved here: a quote is only stored when it is saved as a draft,
+      //    exported or synced, so merely extracting never uses up a quote number.
       const formData = new FormData();
       uploadedFiles.forEach((file) => formData.append("files", file));
       if (emailText.trim()) formData.append("emailText", emailText.trim());
       formData.append("model", selectedModel);
-      const apiUrl = (
-        import.meta.env["VITE_EXTRACTION_API_URL"] ||
-        (typeof window !== "undefined" &&
-        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-          ? "http://localhost:4000"
-          : "https://quote-craft-pilot.onrender.com")
-      ).replace(/\/$/, "");
-
-      const response = await fetch(`${apiUrl}/api/extract`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(`${apiUrl}/api/extract`, { method: "POST", body: formData });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Extraction failed.");
 
-      const pdfHash = await computePdfHash(uploadedFiles);
-
-      // Check duplicate on extraction payload
-      if (!forceNewQuote && pdfHash) {
-        const duplicateResponse = await fetch(`${apiUrl}/api/quotes/duplicate-check`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            pdfHash,
-            businessUnit: selectedBU,
-            sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
-            customer: payload.extraction.customer,
-            parts: payload.extraction.parts,
-          }),
-        });
-        const duplicatePayload = await duplicateResponse.json();
-        if (duplicatePayload.duplicate) {
-          setDuplicateData(toDuplicateInfo(duplicatePayload));
-          setPendingExtractionPayload(payload.extraction);
-          setDuplicateModalOpen(true);
-          setIsExtracting(false);
-          return;
-        }
-      }
-
-      // Save quote record into DB
-      await fetch(`${apiUrl}/api/quotes/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draftSequenceId: currentDraftId,
-          businessUnit: selectedBU,
-          customer: payload.extraction.customer,
-          parts: payload.extraction.parts,
-          pdfHash,
-          sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
-          formPayload: payload.extraction,
-          status: "EXTRACTED",
-          forceNewQuote,
-        }),
-      });
-
-      onRun(payload.extraction, uploadedFiles, forceNewQuote ? "new" : null);
+      const extraction: ExtractionResult = {
+        ...payload.extraction,
+        pdfHash: pdfHash ?? undefined,
+        sourceFile,
+        duplicateAction: activeDecision?.action ?? null,
+      };
+      onRun(extraction, uploadedFiles, activeDecision?.action ?? null);
     } catch (requestError) {
       setError(
         requestError instanceof TypeError
@@ -377,42 +370,18 @@ export function SectionInput({
     }
   };
 
-  // Duplicate Warning Modal Actions (PRD Section 4.2)
-  const handleModalCreateRevision = async () => {
+  // Duplicate popup actions: they only record the decision and close. No extraction starts.
+  const handleModalCreateRevision = () => {
+    const quoteNumber = duplicateData?.quoteNumber ?? "";
+    setDuplicateDecision({ action: "revision", bu: selectedBU, quoteNumber });
+    onDuplicateDecision?.({ action: "revision", quoteNumber });
     setDuplicateModalOpen(false);
-    if (pendingExtractionPayload) {
-      const apiUrl = (
-        import.meta.env["VITE_EXTRACTION_API_URL"] ||
-        (typeof window !== "undefined" &&
-        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-          ? "http://localhost:4000"
-          : "https://quote-craft-pilot.onrender.com")
-      ).replace(/\/$/, "");
-
-      const pdfHash = await computePdfHash(uploadedFiles);
-      await fetch(`${apiUrl}/api/quotes/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draftSequenceId: duplicateData?.quoteNumber,
-          businessUnit: selectedBU,
-          customer: pendingExtractionPayload.customer,
-          parts: pendingExtractionPayload.parts,
-          pdfHash,
-          sourceFile: uploadedFiles[0]?.name || "unknown.pdf",
-          formPayload: pendingExtractionPayload,
-          status: "EXTRACTED",
-          forceNewQuote: false,
-        }),
-      });
-
-      onRun(pendingExtractionPayload, uploadedFiles, "revision");
-    }
   };
 
-  const handleModalCreateNewQuote = async () => {
+  const handleModalCreateNewQuote = () => {
+    setDuplicateDecision({ action: "new", bu: selectedBU, quoteNumber: "" });
+    onDuplicateDecision?.({ action: "new" });
     setDuplicateModalOpen(false);
-    await executeExtraction(true);
   };
 
   // View an earlier quote made from this same PDF (full extraction, specs and price breakdown)
@@ -439,7 +408,7 @@ export function SectionInput({
   const handleModalCancel = () => {
     setDuplicateModalOpen(false);
     setUploadedFiles([]);
-    setPendingExtractionPayload(null);
+    setDuplicateDecision(null);
     setDuplicateData(null);
   };
 
@@ -592,9 +561,11 @@ export function SectionInput({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="OC Custom Coating">OC Custom Coating</SelectItem>
-                <SelectItem value="MAD Custom-Coating">MAD Custom-Coating</SelectItem>
-                <SelectItem value="Maverick Powder Coating">Maverick Powder Coating</SelectItem>
+                {businessUnits.map((bu) => (
+                  <SelectItem key={bu} value={bu}>
+                    {bu}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -644,10 +615,19 @@ export function SectionInput({
                 </SelectContent>
               </Select>
             </div>
-            <Button size="lg" disabled={isExtracting} onClick={() => executeExtraction(false)}>
+            <Button size="lg" disabled={isExtracting} onClick={() => void executeExtraction()}>
               {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
             </Button>
           </div>
+          {activeDecision ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Duplicate PDF:{" "}
+              {activeDecision.action === "revision"
+                ? `this will be a new revision of ${activeDecision.quoteNumber}`
+                : "this will be saved as a separate new quote"}
+              . Pick the business unit, then press RUN Extraction when you are ready.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 

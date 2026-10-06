@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import { useBusinessUnits } from "@/lib/businessUnits";
 import { searchLocalQuotes, getLocalQuotes } from "@/lib/localQuoteStore";
 
 export type QuoteRecord = {
@@ -68,6 +69,7 @@ export function QuoteHistoryDialog({
   onOpenChange: (open: boolean) => void;
   onRehydrateState: (quote: QuoteRecord, payload: ExtractionResult) => void;
 }) {
+  const businessUnits = useBusinessUnits();
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -170,7 +172,7 @@ export function QuoteHistoryDialog({
       const customer = quote.customerName || "Customer";
       const filename = `${quote.odooSequenceId || quote.draftSequenceId}_odoo_import.csv`;
 
-      downloadOdooCsv(parts, customer, null, filename);
+      await downloadOdooCsv(parts, customer, null, filename, quote.draftSequenceId);
       setActionMessage(`Exported ${filename}`);
     } catch (err) {
       setActionMessage("Export failed.");
@@ -280,9 +282,11 @@ export function QuoteHistoryDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Business Units</SelectItem>
-                <SelectItem value="OC Custom Coating">OC Custom Coating</SelectItem>
-                <SelectItem value="MAD Custom-Coating">MAD Custom-Coating</SelectItem>
-                <SelectItem value="Maverick Powder Coating">Maverick Powder Coating</SelectItem>
+                {businessUnits.map((bu) => (
+                  <SelectItem key={bu} value={bu}>
+                    {bu}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
