@@ -103,14 +103,14 @@ in `odooCrossCheck.js`), not left as a convention to remember: if that company n
 found in Odoo, cross-check/create fail loudly rather than silently reading/writing across
 every company.
 
-Every quotation created also gets tagged **"+temp test"** (Odoo `crm.tag`, found or
+Every quotation created also gets tagged **"+temp"** (Odoo `crm.tag`, found or
 created automatically), and each order line's description follows the exact format:
 
 ```
-<part name> -- <total square inches> si +temp test
+<part name> -- <total square inches> si +temp
 ```
 
-e.g. `Base Riveted Assy, Whip Antenna Mount, Menace-X -- 142.5 si +temp test`. If the
+e.g. `Base Riveted Assy, Whip Antenna Mount, Menace-X -- 142.5 si +temp`. If the
 surface area couldn't be computed (see the dimension-extraction section above - most
 complex/folded parts without a flat-pattern view), it reads `-- area unknown si +temp
 test` instead of a fabricated number.

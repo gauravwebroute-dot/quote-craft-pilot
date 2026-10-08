@@ -10,7 +10,14 @@ import { DEFAULT_RATE_CARD } from "../config/rateCard.js";
  */
 
 export const TEST_COMPANY_NAME = "OC Custom Coating";
-export const TEST_TAG_NAME = "+temp test";
+// Label added to every quotation / customer / CSV row the app creates while testing.
+// Override with ODOO_TEMP_TAG; the default matches the "+temp" tag created in Odoo.
+export const TEST_TAG_NAME = (process.env.ODOO_TEMP_TAG || "+temp").trim();
+
+// Technical names of the custom fields created on Odoo's Sales Order Line (sale.order.line).
+// Rev / Work Type keep the original names; Sq. In. and Price / SI were created as x_sq_in / x_price_si.
+export const FIELD_SQ_IN = (process.env.ODOO_FIELD_SQ_IN || "x_sq_in").trim();
+export const FIELD_PRICE_SI = (process.env.ODOO_FIELD_PRICE_SI || "x_price_si").trim();
 
 const DUMMY_CUSTOMERS = [
   {
@@ -187,7 +194,7 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
         priorQuotes = lines.map((l) => {
           const desc = l.name || "";
           const areaMatch = desc.match(/--\s*([\d.]+)\s*si/i);
-          const area = Number(l.x_sq_in_per_unit) || (areaMatch ? parseFloat(areaMatch[1]) : 0);
+          const area = Number(l[FIELD_SQ_IN]) || (areaMatch ? parseFloat(areaMatch[1]) : 0);
           const revMatch = desc.match(/\[Rev:\s*([^\]]+)\]/i);
           const rev = l.x_rev || (revMatch ? revMatch[1].trim() : "—");
           const dateStr = l.create_date
@@ -214,11 +221,11 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
                   ? "Quotation Sent"
                   : "Quotation",
             clientRef: l._clientRef || null,
-            workType: (desc.split("|")[1] || "").replace(/\+temp test/i, "").trim() || null,
+            workType: (desc.split("|")[1] || "").replace(/\+temp(?: test)?/i, "").trim() || null,
             revision: rev,
             quantity: qty,
             areaSqIn: area,
-            pricePerSi: Number(l.x_price_per_si) || 0.4,
+            pricePerSi: Number(l[FIELD_PRICE_SI]) || 0.4,
             unitPrice: unitPrice,
             lineTotal: lineTotal,
             quoteTotal: lineTotal,
@@ -395,8 +402,8 @@ const LINE_FIELDS = [
   "order_id",
   "create_date",
   "x_rev",
-  "x_sq_in_per_unit",
-  "x_price_per_si",
+  FIELD_SQ_IN,
+  FIELD_PRICE_SI,
 ];
 const LINE_FIELDS_BASE = [
   "id",
@@ -901,7 +908,7 @@ export async function getLiveOdooQuoteDetails(idOrName) {
       const totalPrice = Number(l.price_subtotal) || unitPrice * quantity;
       const workType =
         noteInfo.workType ||
-        (desc.split("|")[1] || "").replace(/\+temp test/i, "").trim() ||
+        (desc.split("|")[1] || "").replace(/\+temp(?: test)?/i, "").trim() ||
         "NOT_SPECIFIED";
       const partName =
         noteInfo.partName ||

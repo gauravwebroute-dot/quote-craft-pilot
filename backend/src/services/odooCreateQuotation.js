@@ -8,6 +8,8 @@ import {
   resolveTestTagId,
   TEST_COMPANY_NAME,
   TEST_TAG_NAME,
+  FIELD_SQ_IN,
+  FIELD_PRICE_SI,
 } from "./odooCrossCheck.js";
 
 /**
@@ -203,8 +205,8 @@ async function createLiveQuotation({
         price_unit: unitPrice,
         x_rev: p.original?.revision || false,
         x_work_type: workType,
-        x_sq_in_per_unit: areaSqIn,
-        x_price_per_si: pricePerSi,
+        [FIELD_SQ_IN]: areaSqIn,
+        [FIELD_PRICE_SI]: pricePerSi,
       },
     ];
   });
@@ -233,48 +235,59 @@ async function createLiveQuotation({
     ];
   });
 
+  const baseValues = {
+    partner_id: partnerId,
+    company_id: companyId,
+    client_order_ref: draftRef,
+    note: noteSummary,
+    tag_ids: [[6, 0, [tagId]]],
+  };
+
+  // Try the richest payload first and step down if this Odoo database lacks a custom field:
+  //   1. line custom fields + x_quotepilot_json on the order
+  //   2. line custom fields only (x_quotepilot_json not created in Odoo)
+  //   3. standard fields only (no custom fields at all)
+  const attempts = [
+    {
+      label: "line custom fields + x_quotepilot_json",
+      values: {
+        ...baseValues,
+        x_quotepilot_json: payloadBlob,
+        order_line: orderLinesWithCustomFields,
+      },
+    },
+    {
+      label: "line custom fields only",
+      values: { ...baseValues, order_line: orderLinesWithCustomFields },
+    },
+    {
+      label: "standard fields only",
+      values: { ...baseValues, order_line: orderLinesStandardOnly },
+    },
+  ];
+
   let saleOrderId;
-  try {
-    // Attempt creation with custom fields (REQ-005 & REQ-006)
-    saleOrderId = await odooCall("object", "execute_kw", [
-      process.env.ODOO_DB,
-      uid,
-      process.env.ODOO_API_KEY,
-      "sale.order",
-      "create",
-      [
-        {
-          partner_id: partnerId,
-          company_id: companyId,
-          client_order_ref: draftRef,
-          note: noteSummary,
-          tag_ids: [[6, 0, [tagId]]],
-          x_quotepilot_json: payloadBlob,
-          order_line: orderLinesWithCustomFields,
-        },
-      ],
-    ]);
-  } catch (customErr) {
-    console.warn("Custom field creation fallback to standard fields:", customErr.message);
-    // Fallback without custom x_* fields if remote Odoo doesn't have custom module installed
-    saleOrderId = await odooCall("object", "execute_kw", [
-      process.env.ODOO_DB,
-      uid,
-      process.env.ODOO_API_KEY,
-      "sale.order",
-      "create",
-      [
-        {
-          partner_id: partnerId,
-          company_id: companyId,
-          client_order_ref: draftRef,
-          note: noteSummary,
-          tag_ids: [[6, 0, [tagId]]],
-          order_line: orderLinesStandardOnly,
-        },
-      ],
-    ]);
+  let lastErr;
+  for (const attempt of attempts) {
+    try {
+      saleOrderId = await odooCall("object", "execute_kw", [
+        process.env.ODOO_DB,
+        uid,
+        process.env.ODOO_API_KEY,
+        "sale.order",
+        "create",
+        [attempt.values],
+      ]);
+      if (attempt !== attempts[0]) {
+        console.warn(`[odoo-write] created using fallback payload: ${attempt.label}`);
+      }
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[odoo-write] create failed (${attempt.label}):`, err.message);
+    }
   }
+  if (!saleOrderId) throw lastErr;
 
   const [createdOrder] = await odooCall("object", "execute_kw", [
     process.env.ODOO_DB,

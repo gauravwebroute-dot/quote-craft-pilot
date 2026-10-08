@@ -8,25 +8,30 @@ import { apiBaseUrl } from "@/lib/businessUnits";
  *
  * Headers:
  * - Customer
+ * - Tags (always "+temp" while testing)
  * - Customer Reference
  * - Order Lines/Products
  * - Order Lines/Description
  * - Order Lines/x_rev
- * - Order Lines/x_sq_in_per_unit
+ * - Order Lines/x_sq_in
  * - Order Lines/x_work_type
- * - Order Lines/x_price_per_si
+ * - Order Lines/x_price_si
  * - Order Lines/Unit Price
  * - Order Lines/Quantity
  */
+/** Label added to every exported row; must exist as a Tag in Odoo before importing. */
+export const ODOO_TEMP_TAG = "+temp";
+
 export interface OdooCsvRow {
   Customer: string;
+  Tags: string;
   "Customer Reference": string;
   "Order Lines/Products": string;
   "Order Lines/Description": string;
   "Order Lines/x_rev": string;
-  "Order Lines/x_sq_in_per_unit": number | string;
+  "Order Lines/x_sq_in": number | string;
   "Order Lines/x_work_type": string;
-  "Order Lines/x_price_per_si": number | string;
+  "Order Lines/x_price_si": number | string;
   "Order Lines/Unit Price": number | string;
   "Order Lines/Quantity": number;
 }
@@ -78,17 +83,18 @@ export function mapQuotePilotToOdooCsv(
     const specText = specs ? ` | Specs: ${specs}` : "";
     const displayName =
       partNumber && baseName !== partNumber ? `${partNumber} - ${baseName}` : baseName;
-    const fullDescription = `${displayName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} +temp test`;
+    const fullDescription = `${displayName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} ${ODOO_TEMP_TAG}`;
 
     return {
       Customer: customer,
+      Tags: ODOO_TEMP_TAG,
       "Customer Reference": quoteNumber || partNumber,
       "Order Lines/Products": partNumber,
       "Order Lines/Description": fullDescription,
       "Order Lines/x_rev": rev,
-      "Order Lines/x_sq_in_per_unit": effectiveArea,
+      "Order Lines/x_sq_in": effectiveArea,
       "Order Lines/x_work_type": workType,
-      "Order Lines/x_price_per_si": pricePerSi,
+      "Order Lines/x_price_si": pricePerSi,
       "Order Lines/Unit Price": Number(unitPrice.toFixed(2)),
       "Order Lines/Quantity": quantity,
     };
@@ -107,13 +113,14 @@ function escapeCsvCell(value: unknown): string {
 export function generateOdooCsvString(rows: OdooCsvRow[]): string {
   const headers: (keyof OdooCsvRow)[] = [
     "Customer",
+    "Tags",
     "Customer Reference",
     "Order Lines/Products",
     "Order Lines/Description",
     "Order Lines/x_rev",
-    "Order Lines/x_sq_in_per_unit",
+    "Order Lines/x_sq_in",
     "Order Lines/x_work_type",
-    "Order Lines/x_price_per_si",
+    "Order Lines/x_price_si",
     "Order Lines/Unit Price",
     "Order Lines/Quantity",
   ];
