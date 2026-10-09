@@ -162,7 +162,11 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
 
   const calculatedUnitPrice = round2(directCost + rushOrderCost + setupCost + shippingCost - discountCost + overheadProfitCost);
   const minPrice = rc.minimumPricePerUnit ?? 5.0;
-  const pricePerUnit = round2(Math.max(minPrice, calculatedUnitPrice));
+  const estimatedPricePerUnit = round2(Math.max(minPrice, calculatedUnitPrice));
+  // Operator chose to reuse the last confirmed price for this customer + part (see Odoo cross-check).
+  const lastQuotedOverride = Number(part.priceOverrideUnit);
+  const useLastQuoted = part.priceSource === "LAST_QUOTED" && lastQuotedOverride > 0;
+  const pricePerUnit = useLastQuoted ? round2(lastQuotedOverride) : estimatedPricePerUnit;
   const totalLineItem = round2(pricePerUnit * quantity);
 
   // --- Pricing Summary for UI ---
@@ -186,6 +190,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     directCost,
     pricePerUnit,
     totalLineItem,
+    priceSource: useLastQuoted ? "LAST_QUOTED" : "QP_ESTIMATE",
+    estimatedPricePerUnit,
     breakdown: {
       masking,
       mediaBlasting,

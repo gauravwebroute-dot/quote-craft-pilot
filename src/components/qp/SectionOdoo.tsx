@@ -64,6 +64,21 @@ export type PriorQuoteDetail = {
   /** How this earlier quote was created (synced from QuotePilot, CSV import, directly in Odoo...). */
   sourceLabel?: string | null;
   clientRef?: string | null;
+  confirmed?: boolean;
+  orderDate?: string | null;
+  invoiceNumber?: string | null;
+};
+
+type LastQuoted = {
+  partNumber: string | null;
+  description: string | null;
+  customerName: string | null;
+  unitPrice: number;
+  quantity: number;
+  revision: string | null;
+  orderDate: string | null;
+  orderName: string;
+  invoiceNumber: string | null;
 };
 
 type PartCrossCheck = {
@@ -78,6 +93,8 @@ type PartCrossCheck = {
     saleOrderName?: string;
   } | null;
   priorQuotes?: PriorQuoteDetail[];
+  /** Most recent CONFIRMED sales order for this customer + part (null when none). */
+  lastQuoted?: LastQuoted | null;
   computedPrice: {
     pricePerUnit?: number;
     totalLineItem?: number;
@@ -152,9 +169,16 @@ export function SectionOdoo({
   onSyncComplete,
   onRehydrateQuote,
   onViewQuote,
+  onApplyPrice,
 }: {
   /** Opens an earlier quote (full extracted data, specs and price breakdown) in the app. */
   onViewQuote?: (quote: Record<string, unknown>, payload: ExtractionResult) => void;
+  /** Reuse the last confirmed price (LAST_QUOTED) or fall back to the QuotePilot estimate. */
+  onApplyPrice?: (
+    partNumber: string | null,
+    source: "LAST_QUOTED" | "QP_ESTIMATE",
+    unitPrice: number | null,
+  ) => void;
   onBack: () => void;
   extraction?: ExtractionResult | null;
   quoteNumber?: string;
@@ -223,11 +247,21 @@ export function SectionOdoo({
   };
 
   // Check on mount or when businessUnit/extraction changes
+  // Re-run only when the drawing data changes — NOT when the operator picks "use last price", which
+  // only touches priceSource / priceOverrideUnit.
+  const crossCheckKey = extraction
+    ? JSON.stringify([
+        extraction.customer,
+        extraction.parts.map(({ priceSource: _s, priceOverrideUnit: _o, ...rest }) => rest),
+        businessUnit,
+      ])
+    : null;
   useEffect(() => {
     if (extraction) {
       void runCrossCheck();
     }
-  }, [extraction, businessUnit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crossCheckKey]);
 
   const handleResolutionChange = (
     conflictId: string,
@@ -388,6 +422,11 @@ export function SectionOdoo({
       setError(err instanceof Error ? err.message : "Could not open that quote.");
     }
   };
+
+  const appliedChoice = (partNumber: string | null) =>
+    (
+      extraction?.parts as Array<{ partNumber?: string | null; priceSource?: string }> | undefined
+    )?.find((p) => (p.partNumber ?? null) === partNumber)?.priceSource ?? "QP_ESTIMATE";
 
   const handleOpenPriceHistory = (part?: PartCrossCheck) => {
     if (part) {
@@ -851,12 +890,7 @@ export function SectionOdoo({
           <div className="mt-4 space-y-6">
             {(selectedPartForHistory ? [selectedPartForHistory] : partsWithPriorQuotes).map(
               (part, pIdx) => {
-                const prevPrice =
-                  part.previousQuote?.pricePerUnit ?? part.priorQuotes?.[0]?.unitPrice ?? 0;
                 const newPrice = part.computedPrice?.pricePerUnit ?? 0;
-                const diff = newPrice - prevPrice;
-                const diffPct = prevPrice > 0 ? ((diff / prevPrice) * 100).toFixed(1) : "0.0";
-                const isHigher = diff > 0;
                 const quotesList =
                   part.priorQuotes && part.priorQuotes.length > 0 ? part.priorQuotes : [];
 
@@ -880,55 +914,112 @@ export function SectionOdoo({
                       </span>
                     </div>
 
-                    {/* Summary Comparison Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-card p-3.5 rounded-lg border border-border">
-                      <div>
-                        <span className="text-xs text-muted-foreground block">
-                          Last quoted ({part.previousQuote?.quotedAt || "—"})
-                        </span>
-                        <div className="mt-1">
-                          <span className="text-2xl font-bold font-mono text-foreground">
-                            {money(prevPrice)}
-                          </span>
+                    {/* Last confirmed price + choice */}
+                    {(() => {
+                      const lq = part.lastQuoted;
+                      const applied = appliedChoice(part.partNumber);
+                      if (!lq) {
+                        return (
+                          <div className="rounded-lg border border-border bg-card p-3.5 text-sm">
+                            <p className="font-medium text-foreground">
+                              No confirmed sales order for this part yet.
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Earlier quotations are listed below for reference only. Only a
+                              confirmed Sales Order can be reused as the price, so the QuotePilot
+                              estimate ({money(newPrice)} per unit) will be used.
+                            </p>
+                          </div>
+                        );
+                      }
+                      const d = newPrice - lq.unitPrice;
+                      const up = d > 0;
+                      return (
+                        <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+                            <div>
+                              <span className="block text-xs text-muted-foreground">Customer</span>
+                              <span className="font-medium">{lq.customerName || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="block text-xs text-muted-foreground">
+                                Part number &amp; description
+                              </span>
+                              <span className="font-medium font-mono">{lq.partNumber || "—"}</span>
+                              {lq.description && lq.description !== lq.partNumber ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  {lq.description}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div>
+                              <span className="block text-xs text-muted-foreground">
+                                Last quoted unit price
+                              </span>
+                              <span className="text-2xl font-bold font-mono">
+                                {money(lq.unitPrice)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-xs text-muted-foreground">
+                                Date of last quote
+                              </span>
+                              <span className="font-medium font-mono">{lq.orderDate || "—"}</span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {lq.orderName}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-xs text-muted-foreground">
+                                Invoice number
+                              </span>
+                              <span className="font-medium font-mono">
+                                {lq.invoiceNumber || "Not invoiced yet"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-xs text-muted-foreground">
+                                New QuotePilot estimate
+                              </span>
+                              <span className="text-lg font-bold font-mono">{money(newPrice)}</span>
+                              <span
+                                className={`block text-[11px] font-medium ${up ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}
+                              >
+                                {up ? "+" : "-"}
+                                {money(Math.abs(d))} vs last quote
+                              </span>
+                            </div>
+                          </div>
+                          {onApplyPrice ? (
+                            <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={applied === "LAST_QUOTED" ? "default" : "outline"}
+                                onClick={() =>
+                                  onApplyPrice(part.partNumber, "LAST_QUOTED", lq.unitPrice)
+                                }
+                              >
+                                Use last price ({money(lq.unitPrice)})
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={applied !== "LAST_QUOTED" ? "default" : "outline"}
+                                onClick={() => onApplyPrice(part.partNumber, "QP_ESTIMATE", null)}
+                              >
+                                Use new QuotePilot estimate ({money(newPrice)})
+                              </Button>
+                              <span className="text-xs text-muted-foreground">
+                                {applied === "LAST_QUOTED"
+                                  ? "Currently using the last confirmed price."
+                                  : "Currently using the QuotePilot estimate."}
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
-                        <span className="text-[11px] text-muted-foreground">
-                          per unit ·{" "}
-                          {part.previousQuote?.saleOrderName || quotesList[0]?.quoteName || "—"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-xs text-muted-foreground block">
-                          New calculated price
-                        </span>
-                        <div className="mt-1">
-                          <span className="text-2xl font-bold font-mono text-foreground">
-                            {money(newPrice)}
-                          </span>
-                        </div>
-                        <span className="text-[11px] text-muted-foreground">per unit</span>
-                      </div>
-
-                      <div>
-                        <span className="text-xs text-muted-foreground block">Difference</span>
-                        <div
-                          className={`mt-1 flex items-center gap-1 font-bold font-mono text-xl ${isHigher ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}
-                        >
-                          {isHigher ? (
-                            <TrendingUp className="size-4 inline" />
-                          ) : (
-                            <TrendingDown className="size-4 inline" />
-                          )}
-                          {isHigher ? `+${money(Math.abs(diff))}` : `-${money(Math.abs(diff))}`}
-                        </div>
-                        <span
-                          className={`text-[11px] font-medium ${isHigher ? "text-[#D97706]" : "text-[#1B4332] dark:text-emerald-400"}`}
-                        >
-                          {isHigher ? `+${diffPct}%` : `-${Math.abs(Number(diffPct))}%`} vs last
-                          quote
-                        </span>
-                      </div>
-                    </div>
+                      );
+                    })()}
 
                     {/* Table of Earlier Quotes */}
                     <div className="overflow-x-auto rounded border border-border">
@@ -938,6 +1029,7 @@ export function SectionOdoo({
                             <th className="px-3 py-2.5 font-medium">Quote</th>
                             <th className="px-3 py-2.5 font-medium">Date</th>
                             <th className="px-3 py-2.5 font-medium">Status</th>
+                            <th className="px-3 py-2.5 font-medium">Invoice</th>
                             <th className="px-3 py-2.5 font-medium">Rev</th>
                             <th className="px-3 py-2.5 font-medium text-right">Qty</th>
                             <th className="px-3 py-2.5 font-medium text-right">Sq. in</th>
@@ -967,6 +1059,9 @@ export function SectionOdoo({
                                 >
                                   {q.status}
                                 </Badge>
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground">
+                                {q.invoiceNumber || "—"}
                               </td>
                               <td className="px-3 py-2 text-muted-foreground">{q.revision}</td>
                               <td className="px-3 py-2 text-right text-foreground">{q.quantity}</td>

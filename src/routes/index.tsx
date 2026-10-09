@@ -295,6 +295,25 @@ function QuotePilot() {
                 onViewQuote={(quote, payload) =>
                   handleRehydrateState(quote as unknown as QuoteRecord, payload)
                 }
+                onApplyPrice={(partNumber, source, unitPrice) =>
+                  setExtraction((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          parts: prev.parts.map((part) =>
+                            (part.partNumber ?? null) === partNumber
+                              ? {
+                                  ...part,
+                                  priceSource: source,
+                                  priceOverrideUnit:
+                                    source === "LAST_QUOTED" ? (unitPrice ?? undefined) : undefined,
+                                }
+                              : part,
+                          ),
+                        }
+                      : prev,
+                  )
+                }
               />
             ) : null}
           </div>

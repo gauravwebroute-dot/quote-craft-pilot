@@ -78,6 +78,9 @@ export type ExtractionPart = {
   }> | null;
   coatingBom: Record<string, string | null>;
   sourceDrawingFile: string | null;
+  /** Set when the operator chose to reuse the last confirmed Odoo price for this customer + part. */
+  priceSource?: "LAST_QUOTED" | "QP_ESTIMATE" | undefined;
+  priceOverrideUnit?: number | undefined;
 };
 
 export type ExtractionResult = {
@@ -271,11 +274,19 @@ export function SectionInput({
   };
 
   const addFiles = async (selectedFiles: FileList | File[]) => {
-    const validFiles = Array.from(selectedFiles).filter(
-      (file) =>
-        ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
-        file.size <= 20 * 1024 * 1024,
+    const isStep = (file: File) => /\.(step|stp)$/i.test(file.name);
+    const incoming = Array.from(selectedFiles);
+    const validFiles = incoming.filter((file) =>
+      isStep(file)
+        ? file.size <= 50 * 1024 * 1024
+        : ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(file.type) &&
+          file.size <= 20 * 1024 * 1024,
     );
+    if (validFiles.length < incoming.length) {
+      setError(
+        "Some files were skipped. Supported: PDF, PNG, JPEG, WEBP (max 20 MB) and STEP/STP (max 50 MB).",
+      );
+    }
     const newFiles = [...uploadedFiles, ...validFiles].slice(0, 10);
     setUploadedFiles(newFiles);
     setDuplicateDecision(null);
@@ -469,12 +480,13 @@ export function SectionInput({
             <Upload className="size-7 text-muted-foreground" />
             <p className="mt-3 text-base font-medium">Drop drawing files here</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Upload or drop files. Limit 20 MB per file. Supported: PDF, PNG, JPEG, WEBP
+              Upload or drop files. Limit 20 MB per file (50 MB for STEP). Supported: PDF, PNG,
+              JPEG, WEBP, STEP/STP
             </p>
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/pdf,image/png,image/jpeg,image/webp"
+              accept="application/pdf,image/png,image/jpeg,image/webp,.step,.stp"
               multiple
               className="hidden"
               onChange={(event) => {

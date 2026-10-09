@@ -161,6 +161,34 @@ function findDummyCustomer(customer) {
   );
 }
 
+// "Last quoted" = the most recent CONFIRMED sales order (state sale/done) for this customer + part.
+// Draft / sent quotations are shown in the history but never offered as a price to reuse.
+export function pickLastQuoted(priorQuotes, partner, part) {
+  const confirmed = (priorQuotes || [])
+    .filter((q) => q.confirmed && q.unitPrice > 0)
+    .sort((a, b) => {
+      const da = a.orderDate || "";
+      const db = b.orderDate || "";
+      if (da !== db) return db.localeCompare(da);
+      return (b.saleOrderId || 0) - (a.saleOrderId || 0);
+    });
+  const q = confirmed[0];
+  if (!q) return null;
+  return {
+    partNumber: part?.partNumber ?? null,
+    description: part?.partName ?? part?.partNumber ?? null,
+    customerName: partner?.name ?? null,
+    unitPrice: q.unitPrice,
+    quantity: q.quantity,
+    revision: q.revision,
+    orderDate: q.orderDate,
+    orderName: q.quoteName,
+    saleOrderId: q.saleOrderId ?? null,
+    invoiceNumber: q.invoiceNumber || null,
+    clientRef: q.clientRef || null,
+  };
+}
+
 async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
   const uid = await odooAuth();
   const companyInfo = await resolveCompanyInfo(uid, businessUnit);
@@ -221,6 +249,10 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
                   ? "Quotation Sent"
                   : "Quotation",
             clientRef: l._clientRef || null,
+            orderState: l._state || null,
+            confirmed: l._state === "sale" || l._state === "done",
+            orderDate: l._dateOrder ? String(l._dateOrder).slice(0, 10) : null,
+            invoiceNumber: l._invoiceNumber || null,
             workType: (desc.split("|")[1] || "").replace(/\+temp(?: test)?/i, "").trim() || null,
             revision: rev,
             quantity: qty,
@@ -247,6 +279,7 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
     }
     const partResult = buildPartResult(part, partner, previousQuote);
     partResult.priorQuotes = priorQuotes;
+    partResult.lastQuoted = pickLastQuoted(priorQuotes, partner, part);
     results.push(partResult);
   }
 
@@ -358,6 +391,36 @@ async function resolveTestTagId(uid) {
   ]);
 }
 
+// Posted customer invoice number(s) for each sale order (account.move). Never throws: the
+// accounting app may be missing or restricted, in which case invoices are simply unknown.
+async function readInvoiceNumbers(uid, orders) {
+  const result = new Map();
+  const moveIds = Array.from(new Set(orders.flatMap((o) => o.invoice_ids || [])));
+  if (moveIds.length === 0) return result;
+  try {
+    const moves = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "account.move",
+      "read",
+      [moveIds],
+      { fields: ["name", "state", "move_type"] },
+    ]);
+    const byId = new Map((moves || []).map((m) => [m.id, m]));
+    for (const o of orders) {
+      const names = (o.invoice_ids || [])
+        .map((id) => byId.get(id))
+        .filter((m) => m && m.state === "posted" && m.move_type === "out_invoice")
+        .map((m) => m.name);
+      if (names.length) result.set(o.id, names.join(", "));
+    }
+  } catch (err) {
+    console.warn("[crossCheck] could not read invoices:", err.message);
+  }
+  return result;
+}
+
 // Adds each line's order reference (client_order_ref) and state so the UI can say where a quote came from.
 async function findPriorLinesForPart(uid, partner, companyId, part) {
   const lines = await findPriorLinesRaw(uid, partner, companyId, part);
@@ -371,13 +434,16 @@ async function findPriorLinesForPart(uid, partner, companyId, part) {
       "sale.order",
       "read",
       [orderIds],
-      { fields: ["client_order_ref", "state"] },
+      { fields: ["client_order_ref", "state", "date_order", "invoice_ids"] },
     ]);
     const byId = new Map((orders || []).map((o) => [o.id, o]));
+    const invoiceByOrder = await readInvoiceNumbers(uid, orders || []);
     for (const l of lines) {
       const o = byId.get(l.order_id?.[0]);
       l._clientRef = o?.client_order_ref || null;
       l._state = o?.state || null;
+      l._dateOrder = o?.date_order || null;
+      l._invoiceNumber = invoiceByOrder.get(o?.id) || null;
     }
   } catch (err) {
     console.warn("[crossCheck] could not read order references:", err.message);
@@ -603,7 +669,11 @@ function buildPartResult(part, matchedCustomer, previousQuote) {
       ? "EXISTING_QUOTE_FOUND"
       : "NO_PRIOR_QUOTE_FOR_THIS_PART";
 
-  const priceResult = calculatePartPrice(part, DEFAULT_RATE_CARD);
+  // The popup compares against the pure QuotePilot estimate, never an already-applied override.
+  const priceResult = calculatePartPrice(
+    { ...part, priceOverrideUnit: undefined, priceSource: undefined },
+    DEFAULT_RATE_CARD,
+  );
   const computedPrice = priceResult.priced
     ? { pricePerUnit: priceResult.pricePerUnit, totalLineItem: priceResult.totalLineItem }
     : { priced: false, reason: priceResult.reason };

@@ -2,24 +2,47 @@ import { Router } from "express";
 import multer from "multer";
 import { extractFromFiles } from "../services/extractionProvider.js";
 import { calculateSurfaceArea } from "../services/areaCalculator.js";
+import { analyzeStep, isStepFile } from "../services/cadStep.js";
 
 const router = Router();
 
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp"]);
-const MAX_FILE_SIZE_MB = 20;
+const MAX_FILE_SIZE_MB = 50; // STEP assemblies can be large
 const MAX_FILES = 10;
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_SIZE_MB * 1024 * 1024, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      cb(new Error(`Unsupported file type: ${file.mimetype}. Allowed: PDF, PNG, JPEG, WEBP.`));
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype) && !isStepFile(file)) {
+      cb(
+        new Error(
+          `Unsupported file type: ${file.mimetype}. Allowed: PDF, PNG, JPEG, WEBP, STEP/STP.`,
+        ),
+      );
       return;
     }
     cb(null, true);
   },
 });
+
+const stemOf = (name) => String(name ?? "").replace(/\.(step|stp)$/i, "");
+const cleanKeyOf = (v) => String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+// Finds the STEP measurement belonging to an extracted part: by file name, then part number
+// containing the file stem, then (only when counts line up) by position.
+function matchCad(cadResults, part, index, partCount) {
+  if (!cadResults.length) return null;
+  const src = cleanKeyOf(part.sourceDrawingFile);
+  const pn = cleanKeyOf(part.partNumber);
+  const byFile = src && cadResults.find((c) => cleanKeyOf(c.filename) === src);
+  if (byFile) return byFile;
+  const byStem =
+    pn && cadResults.find((c) => cleanKeyOf(c.stem) && (pn.includes(cleanKeyOf(c.stem)) || cleanKeyOf(c.stem).includes(pn)));
+  if (byStem) return byStem;
+  if (cadResults.length === partCount) return cadResults[index];
+  return cadResults.length === 1 && partCount === 1 ? cadResults[0] : null;
+}
 
 // POST /api/extract
 // multipart/form-data with:
@@ -38,23 +61,61 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
       });
     }
 
-    const files = uploadedFiles.map((f) => ({
+    // STEP/STP solids are measured with OpenCascade (real surface area); everything else goes to the model.
+    const stepUploads = uploadedFiles.filter(isStepFile);
+    const visionUploads = uploadedFiles.filter((f) => !isStepFile(f));
+    const cadResults = [];
+    for (const f of stepUploads) {
+      try {
+        const metrics = await analyzeStep(f.buffer);
+        cadResults.push({ filename: f.originalname, stem: stemOf(f.originalname), ...metrics });
+      } catch (stepErr) {
+        return res.status(422).json({
+          error: "STEP_PARSE_FAILED",
+          message: `${f.originalname}: ${stepErr instanceof Error ? stepErr.message : "could not read STEP file."}`,
+        });
+      }
+    }
+
+    const files = visionUploads.map((f) => ({
       base64: f.buffer.toString("base64"),
       mediaType: f.mimetype,
       filename: f.originalname,
     }));
 
-    const extraction = await extractFromFiles(files, emailText || undefined, model);
+    const cadText = cadResults.length
+      ? [
+          "CAD MODEL DATA (measured exactly from uploaded STEP files — treat as ground truth, do not re-estimate area):",
+          ...cadResults.map(
+            (c, i) =>
+              `${i + 1}. File "${c.filename}": total surface area ${c.areaSqIn} sq in; bounding box ${c.bboxIn.l} x ${c.bboxIn.w} x ${c.bboxIn.h} in; volume ${c.volumeCuIn} cu in.`,
+          ),
+          'Create one part per STEP file. Use the file name (without extension) as the part number unless the request text or another drawing gives a real part number. Set sourceDrawingFile to the STEP file name and fileType to "CAD_DRAWING". Material, finish and quantity come from the request text; if absent, mark them NOT_SPECIFIED.',
+        ].join("\n")
+      : "";
+    const combinedText = [emailText, cadText].filter(Boolean).join("\n\n");
+
+    const extraction = await extractFromFiles(files, combinedText || undefined, model);
 
     // PRD v4 Post-Processing & Validation Rules
     if (Array.isArray(extraction?.parts)) {
-      extraction.parts = extraction.parts.map((part) => {
+      extraction.parts = extraction.parts.map((part, partIndex) => {
+        const cad = matchCad(cadResults, part, partIndex, extraction.parts.length);
         // 1. Mandatory Surface Area Calculation & Tier Resolution
-        const areaResult = calculateSurfaceArea(part.dimensions, part.totalSurfaceAreaSqIn);
+        const areaResult = cad
+          ? {
+              areaSqIn: cad.areaSqIn,
+              confidence: "HIGH",
+              method: "Step 2: CAD-derived area (STEP model measured with OpenCascade)",
+              reasoningSummary: `Exact surface area ${cad.areaSqIn} sq in measured from "${cad.filename}" (bounding box ${cad.bboxIn.l} x ${cad.bboxIn.w} x ${cad.bboxIn.h} in).`,
+            }
+          : calculateSurfaceArea(part.dimensions, part.totalSurfaceAreaSqIn);
         const resolvedArea = areaResult.areaSqIn;
         const resolvedConfidence = areaResult.confidence;
-        const resolvedMethod = part.estimationMethod || areaResult.method;
-        const resolvedReasoning = part.reasoningSummary || areaResult.reasoningSummary;
+        const resolvedMethod = cad ? areaResult.method : part.estimationMethod || areaResult.method;
+        const resolvedReasoning = cad
+          ? areaResult.reasoningSummary
+          : part.reasoningSummary || areaResult.reasoningSummary;
 
         // Deterministic surface, masking & coating area enforcement (PRD v2 Item 1)
         const totalSurfaceArea =
@@ -138,6 +199,7 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
 
         return {
           ...part,
+          ...(cad ? { sourceDrawingFile: cad.filename, cadGeometry: { bboxIn: cad.bboxIn, volumeCuIn: cad.volumeCuIn } } : {}),
           partNumber,
           revision,
           companyName,

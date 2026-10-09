@@ -193,8 +193,11 @@ async function createLiveQuotation({
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.4);
+    const reuse = reusedUnitPrice(p.original);
     const unitPrice =
-      computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
+      reuse ??
+      computed?.pricePerUnit ??
+      (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
 
     return [
       0,
@@ -221,8 +224,11 @@ async function createLiveQuotation({
       areaSqIn > 0 ? areaSqIn : "area unknown"
     } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
     const pricePerSi = Number(p.original?.pricePerSi || 0.4);
+    const reuse = reusedUnitPrice(p.original);
     const unitPrice =
-      computed?.pricePerUnit ?? (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
+      reuse ??
+      computed?.pricePerUnit ??
+      (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
 
     return [
       0,
@@ -330,3 +336,10 @@ function auditLog(kind, customer, created, skipped) {
 }
 
 export class SafetyError extends Error {}
+
+// The operator can choose to reuse the last confirmed price for a customer + part; it then wins over
+// the QuotePilot estimate everywhere (pricing engine, CSV and Odoo sync).
+function reusedUnitPrice(part) {
+  const v = Number(part?.priceOverrideUnit);
+  return part?.priceSource === "LAST_QUOTED" && v > 0 ? Math.round(v * 100) / 100 : null;
+}
