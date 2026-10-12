@@ -176,7 +176,7 @@ export function SectionOdoo({
   /** Reuse the last confirmed price (LAST_QUOTED) or fall back to the QuotePilot estimate. */
   onApplyPrice?: (
     partNumber: string | null,
-    source: "LAST_QUOTED" | "QP_ESTIMATE",
+    source: "HISTORY" | "QP_ESTIMATE",
     unitPrice: number | null,
   ) => void;
   onBack: () => void;
@@ -252,7 +252,9 @@ export function SectionOdoo({
   const crossCheckKey = extraction
     ? JSON.stringify([
         extraction.customer,
-        extraction.parts.map(({ priceSource: _s, priceOverrideUnit: _o, ...rest }) => rest),
+        extraction.parts.map(
+          ({ priceSource: _s, priceOverrideUnit: _o, priceRef: _r, ...rest }) => rest,
+        ),
         businessUnit,
       ])
     : null;
@@ -995,9 +997,13 @@ export function SectionOdoo({
                               <Button
                                 type="button"
                                 size="sm"
-                                variant={applied === "LAST_QUOTED" ? "default" : "outline"}
+                                variant={
+                                  applied === "HISTORY" || applied === "LAST_QUOTED"
+                                    ? "default"
+                                    : "outline"
+                                }
                                 onClick={() =>
-                                  onApplyPrice(part.partNumber, "LAST_QUOTED", lq.unitPrice)
+                                  onApplyPrice(part.partNumber, "HISTORY", lq.unitPrice)
                                 }
                               >
                                 Use last price ({money(lq.unitPrice)})
@@ -1005,13 +1011,17 @@ export function SectionOdoo({
                               <Button
                                 type="button"
                                 size="sm"
-                                variant={applied !== "LAST_QUOTED" ? "default" : "outline"}
+                                variant={
+                                  !(applied === "HISTORY" || applied === "LAST_QUOTED")
+                                    ? "default"
+                                    : "outline"
+                                }
                                 onClick={() => onApplyPrice(part.partNumber, "QP_ESTIMATE", null)}
                               >
                                 Use new QuotePilot estimate ({money(newPrice)})
                               </Button>
                               <span className="text-xs text-muted-foreground">
-                                {applied === "LAST_QUOTED"
+                                {applied === "HISTORY" || applied === "LAST_QUOTED"
                                   ? "Currently using the last confirmed price."
                                   : "Currently using the QuotePilot estimate."}
                               </span>

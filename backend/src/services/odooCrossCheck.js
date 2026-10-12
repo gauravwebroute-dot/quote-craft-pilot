@@ -189,6 +189,109 @@ export function pickLastQuoted(priorQuotes, partner, part) {
   };
 }
 
+function odooRecordUrl(model, id) {
+  const base = String(process.env.ODOO_URL || "").replace(/\/+$/, "");
+  return base && id ? `${base}/web#id=${id}&model=${model}&view_type=form` : null;
+}
+
+// Pricing History: every CONFIRMED sales order line for this customer + part, newest first.
+export function buildPricingHistory(priorQuotes, partner) {
+  return (priorQuotes || [])
+    .filter((q) => q.confirmed && q.unitPrice > 0)
+    .sort((a, b) => {
+      const da = a.orderDate || "";
+      const db = b.orderDate || "";
+      if (da !== db) return db.localeCompare(da);
+      return (b.saleOrderId || 0) - (a.saleOrderId || 0);
+    })
+    .map((q) => ({
+      id: q.saleOrderId ? `so-${q.saleOrderId}-${q.id ?? ""}` : String(q.id ?? q.quoteName),
+      date: q.orderDate || null,
+      unitPrice: q.unitPrice,
+      quantity: q.quantity,
+      saleOrderName: q.quoteName,
+      saleOrderId: q.saleOrderId ?? null,
+      customerName: partner?.name ?? null,
+      invoiceNumber: q.invoiceNumber || null,
+      odooUrl: odooRecordUrl("sale.order", q.saleOrderId),
+    }));
+}
+
+// Odoo customer price list: the pricelist assigned to the customer, filtered to fixed-price rules for
+// this part number. Returns quantity tiers (min..next min-1) or null when nothing is listed.
+// Never throws: pricelists are optional in Odoo.
+async function fetchPriceList(uid, partner, part) {
+  try {
+    const pn = String(part.partNumber).trim();
+    const key = normalizeKey(pn);
+    if (!key) return null;
+    const [partnerRec] = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "res.partner",
+      "read",
+      [[partner.id]],
+      { fields: ["property_product_pricelist"] },
+    ]);
+    const plId = partnerRec?.property_product_pricelist?.[0];
+    if (!plId) return null;
+    const items = await odooCall("object", "execute_kw", [
+      process.env.ODOO_DB,
+      uid,
+      process.env.ODOO_API_KEY,
+      "product.pricelist.item",
+      "search_read",
+      [
+        [
+          ["pricelist_id", "=", plId],
+          ["compute_price", "=", "fixed"],
+          "|",
+          "|",
+          ["product_id.default_code", "ilike", pn],
+          ["product_tmpl_id.default_code", "ilike", pn],
+          ["product_tmpl_id.name", "ilike", pn],
+        ],
+      ],
+      {
+        fields: ["min_quantity", "fixed_price", "date_start", "date_end", "product_id", "product_tmpl_id"],
+        limit: 50,
+      },
+    ]);
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = (items || [])
+      .filter((i) => {
+        const label = `${i.product_id?.[1] ?? ""} ${i.product_tmpl_id?.[1] ?? ""}`;
+        const start = i.date_start ? String(i.date_start).slice(0, 10) : null;
+        const end = i.date_end ? String(i.date_end).slice(0, 10) : null;
+        return (
+          normalizeKey(label).includes(key) &&
+          Number(i.fixed_price) > 0 &&
+          (!start || start <= today) &&
+          (!end || end >= today)
+        );
+      })
+      .map((i) => ({ minQty: Number(i.min_quantity) || 0, unitPrice: Number(i.fixed_price) }))
+      .sort((a, b) => a.minQty - b.minQty);
+    // one price per quantity threshold (later rule for the same threshold wins)
+    const byMin = new Map();
+    for (const r of rows) byMin.set(r.minQty, r);
+    const tiers = Array.from(byMin.values());
+    if (tiers.length === 0) return null;
+    return {
+      priceListName: partnerRec.property_product_pricelist?.[1] ?? null,
+      tiers: tiers.map((t, i) => ({
+        minQty: t.minQty < 1 ? 1 : t.minQty,
+        maxQty: tiers[i + 1] ? Math.max(1, tiers[i + 1].minQty - 1) : null,
+        unitPrice: t.unitPrice,
+      })),
+    };
+  } catch (err) {
+    console.warn("[crossCheck] could not read price list:", err.message);
+    return null;
+  }
+}
+
 async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
   const uid = await odooAuth();
   const companyInfo = await resolveCompanyInfo(uid, businessUnit);
@@ -280,6 +383,8 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
     const partResult = buildPartResult(part, partner, previousQuote);
     partResult.priorQuotes = priorQuotes;
     partResult.lastQuoted = pickLastQuoted(priorQuotes, partner, part);
+    partResult.history = buildPricingHistory(priorQuotes, partner);
+    partResult.priceList = partner && part.partNumber ? await fetchPriceList(uid, partner, part) : null;
     results.push(partResult);
   }
 

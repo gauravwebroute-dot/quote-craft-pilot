@@ -3,6 +3,7 @@ import multer from "multer";
 import { extractFromFiles } from "../services/extractionProvider.js";
 import { calculateSurfaceArea } from "../services/areaCalculator.js";
 import { analyzeStep, isStepFile } from "../services/cadStep.js";
+import { extractPurchaseOrder } from "../services/poExtraction.js";
 
 const router = Router();
 
@@ -44,20 +45,87 @@ function matchCad(cadResults, part, index, partCount) {
   return cadResults.length === 1 && partCount === 1 ? cadResults[0] : null;
 }
 
+// Links PO lines to extracted drawing parts (by normalised part number) and creates drawing-less
+// parts for PO lines that have no drawing. Unit prices are kept only when the PO printed them.
+function mergePurchaseOrder(extraction, po) {
+  extraction.purchaseOrder = po;
+  if (!po.lines.length) {
+    extraction.extractionNotes.push("Purchase order uploaded but no order lines could be read.");
+    return;
+  }
+  if (!extraction.customer.company && po.customerName) extraction.customer.company = po.customerName;
+  if (!extraction.customer.contact && po.contactName) extraction.customer.contact = po.contactName;
+  if (!extraction.customer.email && po.contactEmail) extraction.customer.email = po.contactEmail;
+
+  const used = new Set();
+  const findPart = (line) => {
+    const key = cleanKeyOf(line.partNumber);
+    if (!key) return -1;
+    return extraction.parts.findIndex((p, i) => {
+      if (used.has(i)) return false;
+      const pk = cleanKeyOf(p.partNumber);
+      return pk && (pk === key || pk.includes(key) || key.includes(pk));
+    });
+  };
+
+  for (const line of po.lines) {
+    const poLine = { ...line, poNumber: po.poNumber };
+    const idx = findPart(line);
+    if (idx >= 0) {
+      used.add(idx);
+      const part = extraction.parts[idx];
+      part.poLine = poLine;
+      if (part.quantity == null && line.quantity != null) part.quantity = line.quantity;
+      continue;
+    }
+    extraction.parts.push({
+      partNumber: line.partNumber,
+      partName: line.description,
+      partSummary: line.description,
+      revision: "0",
+      quantity: line.quantity ?? 1,
+      material: "NOT_SPECIFIED",
+      prepType: "NOT_SPECIFIED",
+      existingCoating: "NOT_SPECIFIED",
+      dimensions: null,
+      totalSurfaceAreaSqIn: 0,
+      coatingAreaSqIn: null,
+      maskingAreaSqIn: 0,
+      coatingBom: {},
+      bomItems: null,
+      sourceDrawingFile: null,
+      noDrawing: true,
+      poLine,
+    });
+  }
+  extraction.extractionNotes.push(
+    po.hasPricing
+      ? `Purchase order ${po.poNumber ?? ""} read: ${po.lines.length} line(s), unit prices listed.`
+      : `Purchase order ${po.poNumber ?? ""} read: ${po.lines.length} line(s), no unit pricing provided.`,
+  );
+}
+
 // POST /api/extract
 // multipart/form-data with:
 //   - files: one or more PDF/image files (field name "files")
 //   - emailText: optional plain text field with the RFQ email body
-router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
+router.post(
+  "/extract",
+  upload.fields([
+    { name: "files", maxCount: MAX_FILES },
+    { name: "poFiles", maxCount: 5 },
+  ]),
+  async (req, res) => {
   try {
-    const uploadedFiles = req.files ?? [];
+    const uploadedFiles = req.files?.files ?? [];
+    const poUploads = req.files?.poFiles ?? [];
     const emailText = typeof req.body?.emailText === "string" ? req.body.emailText.trim() : "";
     const model = typeof req.body?.model === "string" ? req.body.model.trim() : undefined;
 
-    if (uploadedFiles.length === 0 && !emailText) {
+    if (uploadedFiles.length === 0 && poUploads.length === 0 && !emailText) {
       return res.status(400).json({
         error: "BAD_REQUEST",
-        message: "Provide at least one file (files field) or emailText.",
+        message: "Provide at least one drawing, purchase order, or request text.",
       });
     }
 
@@ -95,14 +163,40 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
       : "";
     const combinedText = [emailText, cadText].filter(Boolean).join("\n\n");
 
-    const extraction = await extractFromFiles(files, combinedText || undefined, model);
+    // Drawings are optional: a PO for an existing part needs no new drawing.
+    const hasDrawingInput = files.length > 0 || cadResults.length > 0 || Boolean(emailText);
+    const extraction = hasDrawingInput
+      ? await extractFromFiles(files, combinedText || undefined, model)
+      : { customer: {}, parts: [], extractionNotes: [] };
+    extraction.customer = extraction.customer ?? {};
+    extraction.parts = Array.isArray(extraction.parts) ? extraction.parts : [];
+    extraction.extractionNotes = extraction.extractionNotes ?? [];
+
+    // Purchase orders / order details: capture lines + listed unit prices and link them to parts.
+    if (poUploads.length > 0) {
+      const poFiles = poUploads.map((f) => ({
+        base64: f.buffer.toString("base64"),
+        mediaType: f.mimetype,
+        filename: f.originalname,
+      }));
+      const po = await extractPurchaseOrder(poFiles, model);
+      mergePurchaseOrder(extraction, po);
+    }
 
     // PRD v4 Post-Processing & Validation Rules
     if (Array.isArray(extraction?.parts)) {
       extraction.parts = extraction.parts.map((part, partIndex) => {
         const cad = matchCad(cadResults, part, partIndex, extraction.parts.length);
         // 1. Mandatory Surface Area Calculation & Tier Resolution
-        const areaResult = cad
+        const areaResult = part.noDrawing
+          ? {
+              areaSqIn: 0,
+              confidence: "LOW",
+              method: "No drawing provided",
+              reasoningSummary:
+                "Created from a purchase order line; no drawing was uploaded, so QuotePilot cannot estimate surface area.",
+            }
+          : cad
           ? {
               areaSqIn: cad.areaSqIn,
               confidence: "HIGH",
@@ -249,7 +343,8 @@ router.post("/extract", upload.array("files", MAX_FILES), async (req, res) => {
       message: err instanceof Error ? err.message : "Unknown error during extraction.",
     });
   }
-});
+  },
+);
 
 // Multer errors (file too large, too many files, bad type) land here
 router.use((err, _req, res, _next) => {

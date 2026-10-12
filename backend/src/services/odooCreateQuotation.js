@@ -341,5 +341,5 @@ export class SafetyError extends Error {}
 // the QuotePilot estimate everywhere (pricing engine, CSV and Odoo sync).
 function reusedUnitPrice(part) {
   const v = Number(part?.priceOverrideUnit);
-  return part?.priceSource === "LAST_QUOTED" && v > 0 ? Math.round(v * 100) / 100 : null;
+  return part?.priceSource && part.priceSource !== "QP_ESTIMATE" && v > 0 ? Math.round(v * 100) / 100 : null;
 }

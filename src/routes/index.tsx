@@ -53,6 +53,7 @@ function QuotePilot() {
   const [step, setStep] = useState(0);
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [poFiles, setPoFiles] = useState<File[]>([]);
   const [focusedSection, setFocusedSection] = useState<string>("overview");
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -129,6 +130,7 @@ function QuotePilot() {
 
     setExtraction(null);
     setUploadedFiles([]);
+    setPoFiles([]);
     setOdooOrderId(null);
     setStep(0);
     setFocusedSection("overview");
@@ -150,6 +152,7 @@ function QuotePilot() {
       setDraftSequenceId(next);
       setExtraction(null);
       setUploadedFiles([]);
+      setPoFiles([]);
       setOdooOrderId(null);
       setStep(0);
       setFocusedSection("overview");
@@ -250,9 +253,10 @@ function QuotePilot() {
                 onDuplicateDecision={(d) => {
                   if (d.action === "revision" && d.quoteNumber) setDraftSequenceId(d.quoteNumber);
                 }}
-                onRun={(result, files) => {
+                onRun={(result, files, _action, orderFiles) => {
                   setExtraction(result);
                   setUploadedFiles(files);
+                  setPoFiles(orderFiles ?? []);
                   setStep(1);
                   setFocusedSection("overview");
                 }}
@@ -273,6 +277,19 @@ function QuotePilot() {
                 onSelectSection={(sec) => setFocusedSection(sec)}
                 extraction={extraction}
                 uploadedFiles={uploadedFiles}
+                poFiles={poFiles}
+                onPatchPart={(index, patch) =>
+                  setExtraction((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          parts: prev.parts.map((part, i) =>
+                            i === index ? { ...part, ...patch } : part,
+                          ),
+                        }
+                      : prev,
+                  )
+                }
                 quoteNumber={draftSequenceId}
                 businessUnit={businessUnit}
               />
@@ -306,7 +323,8 @@ function QuotePilot() {
                                   ...part,
                                   priceSource: source,
                                   priceOverrideUnit:
-                                    source === "LAST_QUOTED" ? (unitPrice ?? undefined) : undefined,
+                                    source !== "QP_ESTIMATE" ? (unitPrice ?? undefined) : undefined,
+                                  priceRef: undefined,
                                 }
                               : part,
                           ),

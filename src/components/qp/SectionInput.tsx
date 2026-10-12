@@ -35,6 +35,24 @@ John
 ABC Company
 714-555-1212`;
 
+export type PoLine = {
+  lineNumber: number | null;
+  partNumber: string | null;
+  description: string | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  poNumber?: string | null;
+};
+
+export type PurchaseOrderData = {
+  fileNames: string[];
+  customerName: string | null;
+  poNumber: string | null;
+  poDate: string | null;
+  lines: PoLine[];
+  hasPricing: boolean;
+};
+
 export type ExtractionPart = {
   partNumber: string | null;
   partName: string | null;
@@ -78,8 +96,14 @@ export type ExtractionPart = {
   }> | null;
   coatingBom: Record<string, string | null>;
   sourceDrawingFile: string | null;
+  /** Matching purchase-order line, if a PO was uploaded. */
+  poLine?: PoLine | undefined;
+  /** True when the part came from a PO line with no drawing. */
+  noDrawing?: boolean | undefined;
+  /** Which sales order / PO line the chosen price came from. */
+  priceRef?: string | undefined;
   /** Set when the operator chose to reuse the last confirmed Odoo price for this customer + part. */
-  priceSource?: "LAST_QUOTED" | "QP_ESTIMATE" | undefined;
+  priceSource?: "PO" | "PRICELIST" | "HISTORY" | "QP_ESTIMATE" | "LAST_QUOTED" | undefined;
   priceOverrideUnit?: number | undefined;
 };
 
@@ -90,6 +114,8 @@ export type ExtractionResult = {
   /** SHA-256 of the uploaded PDF(s); lets us recognise the same drawing uploaded again. */
   pdfHash?: string | undefined;
   sourceFile?: string | undefined;
+  /** Purchase order lines read from uploaded POs (unit prices only when the PO lists them). */
+  purchaseOrder?: PurchaseOrderData | undefined;
   /** Decision taken in the duplicate-PDF popup, if any. */
   duplicateAction?: "revision" | "new" | null | undefined;
 };
@@ -182,6 +208,7 @@ export function SectionInput({
     extraction: ExtractionResult,
     files: File[],
     duplicateAction?: "revision" | "new" | null,
+    poFiles?: File[],
   ) => void;
   currentDraftId?: string;
   businessUnit?: string;
@@ -189,6 +216,10 @@ export function SectionInput({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  // Purchase orders / order details (optional; drawings are not needed for repeat orders).
+  const [poFiles, setPoFiles] = useState<File[]>([]);
+  const poInputRef = useRef<HTMLInputElement>(null);
+  const [isPoDragging, setIsPoDragging] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [emailText, setEmailText] = useState(emailBody);
   // Optional extra details (e.g. a Cerakote BOM) for drawings / CAD files that don't carry them.
@@ -329,6 +360,21 @@ export function SectionInput({
     }
   };
 
+  const addPoFiles = (selected: FileList | File[]) => {
+    const incoming = Array.from(selected);
+    const valid = incoming.filter(
+      (f) =>
+        ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(f.type) &&
+        f.size <= 20 * 1024 * 1024,
+    );
+    if (valid.length < incoming.length) {
+      setError(
+        "Some purchase order files were skipped. Supported: PDF, PNG, JPEG, WEBP (max 20 MB).",
+      );
+    }
+    setPoFiles((current) => [...current, ...valid].slice(0, 5));
+  };
+
   const openFile = (file: File) => {
     window.open(URL.createObjectURL(file), "_blank", "noopener,noreferrer");
   };
@@ -339,7 +385,7 @@ export function SectionInput({
     try {
       const apiUrl = apiBase();
       const pdfHash = await computePdfHash(uploadedFiles);
-      const sourceFile = uploadedFiles[0]?.name || "unknown.pdf";
+      const sourceFile = uploadedFiles[0]?.name || poFiles[0]?.name || "unknown.pdf";
 
       // 1. Duplicate check BEFORE spending an extraction. It looks only at quotes the operator committed
       //    (saved draft / exported / synced) in the business unit selected right now.
@@ -363,6 +409,7 @@ export function SectionInput({
       //    exported or synced, so merely extracting never uses up a quote number.
       const formData = new FormData();
       uploadedFiles.forEach((file) => formData.append("files", file));
+      poFiles.forEach((file) => formData.append("poFiles", file));
       const combinedText = [
         emailText.trim(),
         notesText.trim()
@@ -383,7 +430,7 @@ export function SectionInput({
         sourceFile,
         duplicateAction: activeDecision?.action ?? null,
       };
-      onRun(extraction, uploadedFiles, activeDecision?.action ?? null);
+      onRun(extraction, uploadedFiles, activeDecision?.action ?? null, poFiles);
     } catch (requestError) {
       setError(
         requestError instanceof TypeError
@@ -444,7 +491,8 @@ export function SectionInput({
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Input Form</h1>
         <p className="mt-1 text-base text-muted-foreground">
-          Enter customer email content and upload drawings to begin extraction.
+          Enter customer email content and upload drawings and/or purchase orders to begin
+          extraction.
         </p>
       </div>
 
@@ -566,6 +614,90 @@ export function SectionInput({
 
       <Card className="transition-colors hover:border-muted-foreground/30">
         <CardHeader>
+          <CardTitle className="text-xl font-semibold">
+            Upload Purchase Orders / Order Details{" "}
+            <span className="text-sm font-normal text-muted-foreground">(optional)</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface px-6 py-8 text-center ${isPoDragging ? "border-primary bg-accent" : ""}`}
+            onClick={() => poInputRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsPoDragging(true);
+            }}
+            onDragLeave={() => setIsPoDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setIsPoDragging(false);
+              addPoFiles(event.dataTransfer.files);
+            }}
+          >
+            <Upload className="size-7 text-muted-foreground" />
+            <p className="mt-2 text-base font-medium">Drop purchase orders / order details here</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Upload POs or order documents on their own (repeat orders of existing parts) or
+              together with drawings. Unit prices are captured when the PO lists them. PDF, PNG,
+              JPEG, WEBP.
+            </p>
+            <input
+              ref={poInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                if (event.target.files) addPoFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={(event) => {
+                event.stopPropagation();
+                poInputRef.current?.click();
+              }}
+            >
+              Browse files
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {poFiles.map((file) => (
+              <div
+                key={`${file.name}-${file.lastModified}`}
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3"
+              >
+                <FileText className="size-5 text-muted-foreground" />
+                <span className="text-base font-medium">{file.name}</span>
+                <Badge variant="neutral">PO</Badge>
+                <div className="ml-auto flex items-center gap-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => openFile(file)}>
+                    <Eye className="size-4" /> Open in new tab
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPoFiles((current) => current.filter((item) => item !== file))}
+                  >
+                    <X className="size-4" /> Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {!poFiles.length && (
+              <p className="text-sm text-muted-foreground">No purchase orders uploaded.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="transition-colors hover:border-muted-foreground/30">
+        <CardHeader>
           <CardTitle className="text-xl font-semibold">Additional Info</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -620,7 +752,10 @@ export function SectionInput({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <Button size="lg" disabled={isExtracting} onClick={() => void executeExtraction()}>
+              {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
+            </Button>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Label>AI Model</Label>
@@ -653,9 +788,6 @@ export function SectionInput({
                 </SelectContent>
               </Select>
             </div>
-            <Button size="lg" disabled={isExtracting} onClick={() => void executeExtraction()}>
-              {isExtracting ? "EXTRACTING..." : "RUN Extraction"} <ArrowRight className="size-4" />
-            </Button>
           </div>
           {activeDecision ? (
             <p className="mt-3 text-xs text-muted-foreground">

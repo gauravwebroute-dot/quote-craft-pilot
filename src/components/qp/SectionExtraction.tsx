@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { ExtractionResult, ExtractionPart } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
 import { commitQuote } from "@/lib/quoteCommit";
+import {
+  PricingModel,
+  PriceModelInfo,
+  type PartPatch,
+  type PartPricingSources,
+  type PricingDocument,
+} from "./PricingModel";
 
 export type PricingPartBreakdown = {
   priced: boolean;
@@ -46,6 +53,8 @@ export type PricingPartBreakdown = {
   totalArea?: number;
   directCost?: number;
   pricePerUnit?: number;
+  estimatedPricePerUnit?: number;
+  priceSource?: string;
   totalLineItem?: number;
   reason?: string;
   breakdown?: {
@@ -766,9 +775,14 @@ export function SectionExtraction({
   onSelectSection,
   extraction,
   uploadedFiles = [],
+  poFiles = [],
+  onPatchPart,
   quoteNumber,
   businessUnit = "OC Custom Coating",
 }: {
+  poFiles?: File[];
+  /** Updates one part (price source / quantity) in the shared extraction. */
+  onPatchPart?: (index: number, patch: PartPatch) => void;
   businessUnit?: string;
   onBack: () => void;
   onContinue: () => void;
@@ -826,6 +840,70 @@ export function SectionExtraction({
       cancelled = true;
     };
   }, [extraction, chemFilmRequested]);
+
+  // Pricing sources from Odoo (price list, sales-order history) for the Pricing Model section.
+  const [sources, setSources] = useState<Record<number, PartPricingSources>>({});
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const sourcesKey = extraction
+    ? JSON.stringify([
+        extraction.customer,
+        extraction.parts.map(
+          ({ priceSource: _s, priceOverrideUnit: _o, priceRef: _r, quantity: _q, ...rest }) => rest,
+        ),
+        businessUnit,
+      ])
+    : null;
+  useEffect(() => {
+    if (!extraction?.parts.length) {
+      setSources({});
+      return undefined;
+    }
+    let cancelled = false;
+    setSourcesLoading(true);
+    const base = (
+      import.meta.env["VITE_EXTRACTION_API_URL"] ||
+      (typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+        ? "http://localhost:4000"
+        : "https://quote-craft-pilot.onrender.com")
+    ).replace(/\/$/, "");
+    fetch(`${base}/api/odoo/cross-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer: extraction.customer,
+        parts: extraction.parts,
+        businessUnit,
+      }),
+    })
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (cancelled) return;
+        const next: Record<number, PartPricingSources> = {};
+        (payload?.parts ?? []).forEach(
+          (p: PartPricingSources, i: number) =>
+            (next[i] = { history: p.history, priceList: p.priceList }),
+        );
+        setSources(next);
+      })
+      .catch(() => {
+        if (!cancelled) setSources({});
+      })
+      .finally(() => {
+        if (!cancelled) setSourcesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourcesKey]);
+
+  // Blob URLs so uploaded purchase orders can be opened in a separate tab / shown inline.
+  const poDocuments = useMemo<PricingDocument[]>(
+    () => poFiles.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })),
+    [poFiles],
+  );
+  useEffect(() => () => poDocuments.forEach((d) => URL.revokeObjectURL(d.url)), [poDocuments]);
 
   const handleOpenDrawing = (drawingName?: string | null) => {
     if (!uploadedFiles || uploadedFiles.length === 0) return;
@@ -1165,7 +1243,9 @@ export function SectionExtraction({
                           Price / SI
                         </th>
                         <th className="border-r border-slate-300 px-2 py-3 text-right">
-                          Price / Unit
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Price / Unit <PriceModelInfo />
+                          </span>
                         </th>
                         <th className="border-r border-slate-300 px-1.5 py-3 text-right">Qty</th>
                         <th className="px-2 py-3 text-right">Total</th>
@@ -1257,24 +1337,41 @@ export function SectionExtraction({
               </CardContent>
             </Card>
           )}
+
+          {(focusedSection === "overview" || focusedSection === "summary" || !focusedSection) &&
+          parts.length > 0 ? (
+            <div className="space-y-4">
+              {parts.map((part, index) => (
+                <PricingModel
+                  key={`${part.partNumber ?? "part"}-${index}`}
+                  part={part}
+                  sources={sources[index]}
+                  loading={sourcesLoading}
+                  hasPurchaseOrder={Boolean(extraction?.purchaseOrder)}
+                  purchaseOrder={extraction?.purchaseOrder}
+                  qpUnitPrice={pricing?.results[index]?.estimatedPricePerUnit ?? null}
+                  poDocuments={poDocuments}
+                  onPatch={(patch) => onPatchPart?.(index, patch)}
+                />
+              ))}
+            </div>
+          ) : null}
         </>
       )}
 
-      {/* Navigation Buttons */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+      {/* Navigation Buttons: all actions sit on the left, next to Back */}
+      <div className="flex flex-wrap items-center gap-3 pt-2">
         <Button variant="outline" onClick={onBack} className="gap-2">
           <ArrowLeft className="size-4" /> Back to Input
         </Button>
-        <div className="flex items-center gap-2">
-          {!hasExtractedParts ? (
-            <Button variant="default" onClick={handleRunExtraction} className="gap-2">
-              <ArrowLeft className="size-4" /> Run Extraction
-            </Button>
-          ) : null}
-          <Button onClick={onContinue} className="gap-2 bg-primary" disabled={!hasExtractedParts}>
-            Continue to Odoo Cross-Check <ArrowRight className="size-4" />
+        {!hasExtractedParts ? (
+          <Button variant="default" onClick={handleRunExtraction} className="gap-2">
+            <ArrowLeft className="size-4" /> Run Extraction
           </Button>
-        </div>
+        ) : null}
+        <Button onClick={onContinue} className="gap-2 bg-primary" disabled={!hasExtractedParts}>
+          Continue to Odoo Cross-Check <ArrowRight className="size-4" />
+        </Button>
       </div>
     </div>
   );
