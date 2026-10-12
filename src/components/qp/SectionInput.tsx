@@ -191,6 +191,8 @@ export function SectionInput({
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [emailText, setEmailText] = useState(emailBody);
+  // Optional extra details (e.g. a Cerakote BOM) for drawings / CAD files that don't carry them.
+  const [notesText, setNotesText] = useState("");
   const [models, setModels] = useState<ModelOption[]>(DEFAULT_MODELS);
   const [selectedModel, setSelectedModel] = useState("~google/gemini-flash-latest");
   const [selectedBU, setSelectedBU] = useState(businessUnit || "OC Custom Coating");
@@ -361,7 +363,15 @@ export function SectionInput({
       //    exported or synced, so merely extracting never uses up a quote number.
       const formData = new FormData();
       uploadedFiles.forEach((file) => formData.append("files", file));
-      if (emailText.trim()) formData.append("emailText", emailText.trim());
+      const combinedText = [
+        emailText.trim(),
+        notesText.trim()
+          ? `ADDITIONAL NOTES FROM THE QUOTER (authoritative, apply to the parts):\n${notesText.trim()}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      if (combinedText) formData.append("emailText", combinedText);
       formData.append("model", selectedModel);
       const response = await fetch(`${apiUrl}/api/extract`, { method: "POST", body: formData });
       const payload = await response.json();
@@ -455,6 +465,16 @@ export function SectionInput({
               Clear
             </Button>
           </div>
+          <Label htmlFor="rfq-notes">
+            Additional notes <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <Textarea
+            id="rfq-notes"
+            className="min-h-[90px]"
+            placeholder="e.g. Cerakote BOM: Primer – none; Topcoat – Cerakote H-146 Graphite Black; Mask all threads. Use this when the drawing or CAD file doesn't list the coating."
+            value={notesText}
+            onChange={(event) => setNotesText(event.target.value)}
+          />
         </CardContent>
       </Card>
 
