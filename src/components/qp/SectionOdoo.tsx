@@ -517,6 +517,9 @@ export function SectionOdoo({
       {/* Primary Actions Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
+          <Button variant="outline" onClick={onBack} className="border-[#374151]">
+            <ArrowLeft className="size-4 mr-1" /> Back to Extraction Results
+          </Button>
           <Button
             onClick={runCrossCheck}
             disabled={isChecking}
@@ -859,12 +862,6 @@ export function SectionOdoo({
           </CardContent>
         </Card>
       ) : null}
-
-      <div className="flex">
-        <Button variant="outline" onClick={onBack} className="border-[#374151] text-xs">
-          <ArrowLeft className="size-4 mr-1" /> Back to Extraction Results
-        </Button>
-      </div>
 
       {/* =========================================================================
           PRICE HISTORY DIALOG (Matches Screenshot 5 exactly)

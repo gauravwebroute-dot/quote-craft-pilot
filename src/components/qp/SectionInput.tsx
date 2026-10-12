@@ -528,7 +528,96 @@ export function SectionInput({
 
       <Card className="transition-colors hover:border-muted-foreground/30">
         <CardHeader>
-          <CardTitle className="text-xl font-semibold">Upload Drawings</CardTitle>
+          <CardTitle className="text-xl font-semibold">
+            Upload Purchase Orders / Order Details{" "}
+            <span className="text-sm font-normal text-muted-foreground">(optional)</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface px-6 py-8 text-center ${isPoDragging ? "border-primary bg-accent" : ""}`}
+            onClick={() => poInputRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsPoDragging(true);
+            }}
+            onDragLeave={() => setIsPoDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setIsPoDragging(false);
+              addPoFiles(event.dataTransfer.files);
+            }}
+          >
+            <Upload className="size-7 text-muted-foreground" />
+            <p className="mt-2 text-base font-medium">Drop purchase orders / order details here</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Upload POs or order documents on their own (repeat orders of existing parts) or
+              together with drawings. Unit prices are captured when the PO lists them. PDF, PNG,
+              JPEG, WEBP.
+            </p>
+            <input
+              ref={poInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp,.xlsx,.xls,.xlsm,.csv"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                if (event.target.files) addPoFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={(event) => {
+                event.stopPropagation();
+                poInputRef.current?.click();
+              }}
+            >
+              Browse files
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {poFiles.map((file) => (
+              <div
+                key={`${file.name}-${file.lastModified}`}
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3"
+              >
+                <FileText className="size-5 text-muted-foreground" />
+                <span className="text-base font-medium">{file.name}</span>
+                <Badge variant="neutral">PO</Badge>
+                <div className="ml-auto flex items-center gap-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => openFile(file)}>
+                    <Eye className="size-4" /> Open in new tab
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPoFiles((current) => current.filter((item) => item !== file))}
+                  >
+                    <X className="size-4" /> Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {!poFiles.length && (
+              <p className="text-sm text-muted-foreground">No purchase orders uploaded.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="transition-colors hover:border-muted-foreground/30">
+        <CardHeader>
+          <CardTitle className="text-xl font-semibold">
+            Upload Drawings{" "}
+            <span className="text-sm font-normal text-muted-foreground">
+              (optional when a purchase order covers existing parts)
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div
@@ -608,90 +697,6 @@ export function SectionInput({
               <p className="text-sm text-muted-foreground">No files selected yet.</p>
             )}
             {error && <p className="text-sm font-medium text-destructive">{error}</p>}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="transition-colors hover:border-muted-foreground/30">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold">
-            Upload Purchase Orders / Order Details{" "}
-            <span className="text-sm font-normal text-muted-foreground">(optional)</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div
-            className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface px-6 py-8 text-center ${isPoDragging ? "border-primary bg-accent" : ""}`}
-            onClick={() => poInputRef.current?.click()}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setIsPoDragging(true);
-            }}
-            onDragLeave={() => setIsPoDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setIsPoDragging(false);
-              addPoFiles(event.dataTransfer.files);
-            }}
-          >
-            <Upload className="size-7 text-muted-foreground" />
-            <p className="mt-2 text-base font-medium">Drop purchase orders / order details here</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Upload POs or order documents on their own (repeat orders of existing parts) or
-              together with drawings. Unit prices are captured when the PO lists them. PDF, PNG,
-              JPEG, WEBP.
-            </p>
-            <input
-              ref={poInputRef}
-              type="file"
-              accept="application/pdf,image/png,image/jpeg,image/webp"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                if (event.target.files) addPoFiles(event.target.files);
-                event.target.value = "";
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-3"
-              onClick={(event) => {
-                event.stopPropagation();
-                poInputRef.current?.click();
-              }}
-            >
-              Browse files
-            </Button>
-          </div>
-          <div className="space-y-3">
-            {poFiles.map((file) => (
-              <div
-                key={`${file.name}-${file.lastModified}`}
-                className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3"
-              >
-                <FileText className="size-5 text-muted-foreground" />
-                <span className="text-base font-medium">{file.name}</span>
-                <Badge variant="neutral">PO</Badge>
-                <div className="ml-auto flex items-center gap-1">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => openFile(file)}>
-                    <Eye className="size-4" /> Open in new tab
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPoFiles((current) => current.filter((item) => item !== file))}
-                  >
-                    <X className="size-4" /> Remove
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!poFiles.length && (
-              <p className="text-sm text-muted-foreground">No purchase orders uploaded.</p>
-            )}
           </div>
         </CardContent>
       </Card>

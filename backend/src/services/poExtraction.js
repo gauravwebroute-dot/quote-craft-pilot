@@ -1,6 +1,27 @@
 // Extracts order lines (part number, description, quantity, unit price) from uploaded purchase
 // orders / order documents through OpenRouter. Unit prices are optional: many POs omit them.
 
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+
+export function isSpreadsheetFile(file) {
+  return /\.(xlsx|xls|xlsm|csv)$/i.test(String(file?.originalname ?? file?.filename ?? ""));
+}
+
+/** Turns every sheet of an Excel/CSV order document into plain CSV text the model can read. */
+export function spreadsheetToText(buffer) {
+  const XLSX = require("xlsx");
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  return wb.SheetNames.map((name) => {
+    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name], { blankrows: false });
+    return csv.trim() ? `--- Sheet: ${name} ---\n${csv}` : "";
+  })
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 60000);
+}
+
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const PO_PROMPT = `You read purchase orders and other order documents sent by a customer to a coating shop.
@@ -88,6 +109,13 @@ export async function extractPurchaseOrder(files, modelName) {
 
   const content = [{ type: "text", text: "Purchase order / order document(s):" }];
   for (const file of files) {
+    if (file.text != null) {
+      content.push({
+        type: "text",
+        text: `Spreadsheet "${file.filename}" (rows as CSV):\n${file.text}`,
+      });
+      continue;
+    }
     if (file.mediaType === "application/pdf") {
       content.push({
         type: "file",

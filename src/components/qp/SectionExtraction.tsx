@@ -1000,7 +1000,14 @@ export function SectionExtraction({
       revision: part.revision || "N/A",
       workType,
       area: displayArea === 0 ? "Unknown" : `${displayArea} sq in`,
-      pricePerSqIn: displayArea === 0 ? "Unknown" : isMaskingNeeded ? "$0.46" : "$0.40",
+      priceModel:
+        part.priceSource === "PO"
+          ? "Purchase Order"
+          : part.priceSource === "PRICELIST"
+            ? "Odoo Price List"
+            : part.priceSource === "HISTORY" || part.priceSource === "LAST_QUOTED"
+              ? "Pricing History"
+              : "QP Estimate",
       pricePerUnit: priced?.priced ? formatMoney(priced.pricePerUnit ?? 0) : "Pending",
       qty: part.quantity != null ? String(part.quantity) : "1",
       total: priced?.priced ? formatMoney(priced.totalLineItem ?? 0) : "Pending",
@@ -1239,9 +1246,7 @@ export function SectionExtraction({
                           Sq. In. / Unit
                         </th>
                         <th className="border-r border-slate-300 px-2 py-3">Work Type</th>
-                        <th className="border-r border-slate-300 px-2 py-3 text-right">
-                          Price / SI
-                        </th>
+                        <th className="border-r border-slate-300 px-2 py-3">Price Model</th>
                         <th className="border-r border-slate-300 px-2 py-3 text-right">
                           <span className="inline-flex items-center justify-end gap-1">
                             Price / Unit <PriceModelInfo />
@@ -1290,8 +1295,8 @@ export function SectionExtraction({
                                 {row.workType}
                               </span>
                             </td>
-                            <td className="border-r border-slate-200 px-2 py-3.5 text-right tabular-nums text-muted-foreground">
-                              {row.pricePerSqIn}
+                            <td className="border-r border-slate-200 px-2 py-3.5 text-muted-foreground">
+                              {row.priceModel}
                             </td>
                             <td className="border-r border-slate-200 px-2 py-3.5 text-right font-semibold tabular-nums">
                               {row.pricePerUnit}

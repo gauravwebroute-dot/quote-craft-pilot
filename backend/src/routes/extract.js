@@ -3,7 +3,7 @@ import multer from "multer";
 import { extractFromFiles } from "../services/extractionProvider.js";
 import { calculateSurfaceArea } from "../services/areaCalculator.js";
 import { analyzeStep, isStepFile } from "../services/cadStep.js";
-import { extractPurchaseOrder } from "../services/poExtraction.js";
+import { extractPurchaseOrder, isSpreadsheetFile, spreadsheetToText } from "../services/poExtraction.js";
 
 const router = Router();
 
@@ -15,10 +15,11 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_SIZE_MB * 1024 * 1024, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype) && !isStepFile(file)) {
+    const poSheet = file.fieldname === "poFiles" && isSpreadsheetFile(file);
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype) && !isStepFile(file) && !poSheet) {
       cb(
         new Error(
-          `Unsupported file type: ${file.mimetype}. Allowed: PDF, PNG, JPEG, WEBP, STEP/STP.`,
+          `Unsupported file type: ${file.mimetype}. Allowed: PDF, PNG, JPEG, WEBP, STEP/STP (and Excel/CSV for purchase orders).`,
         ),
       );
       return;
@@ -174,11 +175,11 @@ router.post(
 
     // Purchase orders / order details: capture lines + listed unit prices and link them to parts.
     if (poUploads.length > 0) {
-      const poFiles = poUploads.map((f) => ({
-        base64: f.buffer.toString("base64"),
-        mediaType: f.mimetype,
-        filename: f.originalname,
-      }));
+      const poFiles = poUploads.map((f) =>
+        isSpreadsheetFile(f)
+          ? { filename: f.originalname, mediaType: f.mimetype, text: spreadsheetToText(f.buffer) }
+          : { base64: f.buffer.toString("base64"), mediaType: f.mimetype, filename: f.originalname },
+      );
       const po = await extractPurchaseOrder(poFiles, model);
       mergePurchaseOrder(extraction, po);
     }
