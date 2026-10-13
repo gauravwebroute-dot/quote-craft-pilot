@@ -221,62 +221,129 @@ export function buildPricingHistory(priorQuotes, partner) {
 // assigned to the customer for this part and show them as quantity tiers (min..next min-1). We never
 // compute or guess prices (no percentage / formula rules, no sales-price fallback): how a company
 // structures its pricelists is its own decision, and anything not listed is simply "No price listed".
-// Never throws: pricelists are optional in Odoo.
-async function fetchPriceList(uid, partner, part) {
+// Never throws: pricelists are optional in Odoo. Always returns { tiers, reason, ... } (tiers may be empty;
+// `reason` says why, so the UI can explain "No price listed").
+export async function fetchPriceList(uid, partnerHint, part, companyId, customer) {
+  const empty = (reason, extra = {}) => ({ priceListName: null, currency: null, tiers: [], reason, ...extra });
   try {
     const pn = String(part.partNumber).trim();
     const key = normalizeKey(pn);
-    if (!key) return null;
+    if (!key) return empty("No part number");
     const call = (model, method, args, kwargs = {}) =>
       odooCall("object", "execute_kw", [process.env.ODOO_DB, uid, process.env.ODOO_API_KEY, model, method, args, kwargs]);
+    // property_product_pricelist is company-dependent: it must be read in the quote's company context.
+    const context = companyId ? { allowed_company_ids: [companyId], company_id: companyId } : {};
 
-    const [partnerRec] = await call("res.partner", "read", [[partner.id]], {
-      fields: ["property_product_pricelist"],
+    // Every partner record that may carry the customer's pricelist (the matched customer, duplicates of it,
+    // and the commercial/parent company). A customer with no sale orders yet can still have a pricelist.
+    const partnerIds = new Set(partnerHint?.matchedIds ?? (partnerHint?.id ? [partnerHint.id] : []));
+    const clauses = [];
+    if (customer?.email?.trim()) clauses.push(["email", "=", customer.email.trim()]);
+    if (customer?.company?.trim()) clauses.push(["name", "ilike", customer.company.trim()]);
+    if (clauses.length) {
+      const found = await call(
+        "res.partner",
+        "search_read",
+        [clauses.length > 1 ? ["|", ...clauses] : clauses],
+        { fields: ["id"], context, limit: 20 },
+      );
+      for (const p of found || []) partnerIds.add(p.id);
+    }
+    if (partnerIds.size === 0) return empty("Customer not found in Odoo");
+    const recs = await call("res.partner", "read", [[...partnerIds]], {
+      fields: ["property_product_pricelist", "commercial_partner_id"],
+      context,
     });
-    const plId = partnerRec?.property_product_pricelist?.[0];
-    if (!plId) return null;
+    const ids = new Set();
+    const names = new Map();
+    const commercial = new Set();
+    for (const r of recs || []) {
+      if (r.property_product_pricelist?.[0]) {
+        ids.add(r.property_product_pricelist[0]);
+        names.set(r.property_product_pricelist[0], r.property_product_pricelist[1]);
+      }
+      if (r.commercial_partner_id?.[0] && !partnerIds.has(r.commercial_partner_id[0])) {
+        commercial.add(r.commercial_partner_id[0]);
+      }
+    }
+    if (commercial.size) {
+      const more = await call("res.partner", "read", [[...commercial]], {
+        fields: ["property_product_pricelist"],
+        context,
+      });
+      for (const r of more || []) {
+        if (r.property_product_pricelist?.[0]) {
+          ids.add(r.property_product_pricelist[0]);
+          names.set(r.property_product_pricelist[0], r.property_product_pricelist[1]);
+        }
+      }
+    }
+    if (ids.size === 0) return empty("No price list assigned to this customer in Odoo");
+
+    // Resolve the part to product ids (variant + template) by internal reference.
+    const variants = await call("product.product", "search_read", [[["default_code", "ilike", pn]]], {
+      fields: ["id", "default_code", "product_tmpl_id"],
+      context: { ...context, active_test: false },
+      limit: 50,
+    });
+    const exact = (variants || []).filter((v) => normalizeKey(v.default_code || "") === key);
+    const variantIds = exact.map((v) => v.id);
+    const tmplIds = [...new Set(exact.map((v) => v.product_tmpl_id?.[0]).filter(Boolean))];
+    if (variantIds.length === 0) {
+      return empty(`Part ${pn} not found in Odoo products`, { priceListName: names.values().next().value ?? null });
+    }
 
     const items = await call(
       "product.pricelist.item",
       "search_read",
       [
         [
-          ["pricelist_id", "=", plId],
+          ["pricelist_id", "in", [...ids]],
           ["compute_price", "=", "fixed"],
           "|",
-          "|",
-          ["product_id.default_code", "ilike", pn],
-          ["product_tmpl_id.default_code", "ilike", pn],
-          ["product_tmpl_id.name", "ilike", pn],
+          ["product_id", "in", variantIds],
+          ["product_tmpl_id", "in", tmplIds],
         ],
       ],
       {
-        fields: ["min_quantity", "fixed_price", "date_start", "date_end", "product_id", "product_tmpl_id"],
-        limit: 100,
+        fields: ["pricelist_id", "min_quantity", "fixed_price", "date_start", "date_end", "currency_id"],
+        context,
+        limit: 200,
       },
     );
     const today = new Date().toISOString().slice(0, 10);
-    const rows = (items || [])
-      .filter((i) => {
-        const label = `${i.product_id?.[1] ?? ""} ${i.product_tmpl_id?.[1] ?? ""}`;
-        const start = i.date_start ? String(i.date_start).slice(0, 10) : null;
-        const end = i.date_end ? String(i.date_end).slice(0, 10) : null;
-        return (
-          normalizeKey(label).includes(key) &&
-          Number(i.fixed_price) > 0 &&
-          (!start || start <= today) &&
-          (!end || end >= today)
-        );
-      })
+    const valid = (items || []).filter((i) => {
+      const start = i.date_start ? String(i.date_start).slice(0, 10) : null;
+      const end = i.date_end ? String(i.date_end).slice(0, 10) : null;
+      return Number(i.fixed_price) > 0 && (!start || start <= today) && (!end || end >= today);
+    });
+    // use the first assigned pricelist that actually lists this part
+    const plId = [...ids].find((id) => valid.some((i) => i.pricelist_id?.[0] === id));
+    if (!plId) {
+      return empty(`No fixed price for ${pn} in price list "${[...names.values()].join(", ")}"`, {
+        priceListName: [...names.values()][0] ?? null,
+      });
+    }
+    const rows = valid
+      .filter((i) => i.pricelist_id?.[0] === plId)
       .map((i) => ({ minQty: Math.max(1, Number(i.min_quantity) || 1), unitPrice: Number(i.fixed_price) }))
       .sort((a, b) => a.minQty - b.minQty);
     // one price per quantity threshold (a later rule for the same threshold wins)
     const byMin = new Map();
     for (const r of rows) byMin.set(r.minQty, r);
     const tiers = Array.from(byMin.values());
-    if (tiers.length === 0) return null;
+
+    let currency = null;
+    try {
+      const [pl] = await call("product.pricelist", "read", [[plId]], { fields: ["currency_id"], context });
+      currency = pl?.currency_id?.[1] ?? null;
+    } catch {
+      /* currency is informational only */
+    }
     return {
-      priceListName: partnerRec.property_product_pricelist?.[1] ?? null,
+      priceListName: names.get(plId) ?? null,
+      currency,
+      reason: null,
       tiers: tiers.map((t, i) => ({
         minQty: t.minQty,
         maxQty: tiers[i + 1] ? tiers[i + 1].minQty - 1 : null,
@@ -285,7 +352,7 @@ async function fetchPriceList(uid, partner, part) {
     };
   } catch (err) {
     console.warn("[crossCheck] could not read price list:", err.message);
-    return null;
+    return empty("Could not read the Odoo price list");
   }
 }
 
@@ -381,7 +448,7 @@ async function crossCheckLiveOdoo({ customer, parts, businessUnit = "" }) {
     partResult.priorQuotes = priorQuotes;
     partResult.lastQuoted = pickLastQuoted(priorQuotes, partner, part);
     partResult.history = buildPricingHistory(priorQuotes, partner);
-    partResult.priceList = partner && part.partNumber ? await fetchPriceList(uid, partner, part) : null;
+    partResult.priceList = part.partNumber ? await fetchPriceList(uid, partner, part, companyId, customer) : null;
     results.push(partResult);
   }
 

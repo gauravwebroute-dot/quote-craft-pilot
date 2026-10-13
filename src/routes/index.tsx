@@ -54,6 +54,9 @@ function QuotePilot() {
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [poFiles, setPoFiles] = useState<File[]>([]);
+  // The Input form stays mounted (hidden) while other steps are shown, so nothing typed or uploaded is lost
+  // when the operator goes Back. It is only cleared by "New Quote" / Reset (which bump this key).
+  const [inputFormKey, setInputFormKey] = useState(0);
   const [focusedSection, setFocusedSection] = useState<string>("overview");
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -131,6 +134,7 @@ function QuotePilot() {
     setExtraction(null);
     setUploadedFiles([]);
     setPoFiles([]);
+    setInputFormKey((k) => k + 1);
     setOdooOrderId(null);
     setStep(0);
     setFocusedSection("overview");
@@ -153,6 +157,7 @@ function QuotePilot() {
       setExtraction(null);
       setUploadedFiles([]);
       setPoFiles([]);
+      setInputFormKey((k) => k + 1);
       setOdooOrderId(null);
       setStep(0);
       setFocusedSection("overview");
@@ -244,8 +249,9 @@ function QuotePilot() {
               businessUnit={businessUnit}
             />
 
-            {step === 0 ? (
+            <div className={step === 0 ? "" : "hidden"} aria-hidden={step !== 0}>
               <SectionInput
+                key={inputFormKey}
                 currentDraftId={draftSequenceId}
                 businessUnit={businessUnit}
                 onBusinessUnitChange={setBusinessUnit}
@@ -261,7 +267,7 @@ function QuotePilot() {
                   setFocusedSection("overview");
                 }}
               />
-            ) : null}
+            </div>
 
             {step === 1 ? (
               <SectionExtraction

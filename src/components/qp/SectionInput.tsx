@@ -362,14 +362,17 @@ export function SectionInput({
 
   const addPoFiles = (selected: FileList | File[]) => {
     const incoming = Array.from(selected);
+    // Spreadsheets are recognised by extension: browsers report inconsistent (or empty) MIME types for them.
+    const isSheet = (f: File) => /\.(xlsx|xls|xlsm|csv)$/i.test(f.name);
     const valid = incoming.filter(
       (f) =>
-        ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(f.type) &&
+        (isSheet(f) ||
+          ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(f.type)) &&
         f.size <= 20 * 1024 * 1024,
     );
     if (valid.length < incoming.length) {
       setError(
-        "Some purchase order files were skipped. Supported: PDF, PNG, JPEG, WEBP (max 20 MB).",
+        "Some purchase order files were skipped. Supported: PDF, PNG, JPEG, WEBP, Excel (.xlsx/.xls) and CSV (max 20 MB).",
       );
     }
     setPoFiles((current) => [...current, ...valid].slice(0, 5));

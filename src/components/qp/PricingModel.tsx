@@ -19,6 +19,8 @@ export type HistoryRecord = {
 
 export type PriceListData = {
   priceListName?: string | null;
+  currency?: string | null;
+  reason?: string | null;
   tiers: Array<{ minQty: number; maxQty: number | null; unitPrice: number }>;
 };
 
@@ -38,8 +40,15 @@ export type PartPatch = {
 
 export type PricingDocument = { name: string; url: string };
 
-const money = (n: number | null | undefined) =>
-  typeof n === "number" && Number.isFinite(n) ? `$${n.toFixed(2)}` : "—";
+const currencySymbol = (code?: string | null) => {
+  const c = (code ?? "").trim().toUpperCase();
+  if (!c || c === "USD") return "$";
+  const known: Record<string, string> = { INR: "₹", EUR: "€", GBP: "£" };
+  return known[c] ?? `${c} `;
+};
+
+const money = (n: number | null | undefined, currency?: string | null) =>
+  typeof n === "number" && Number.isFinite(n) ? `${currencySymbol(currency)}${n.toFixed(2)}` : "—";
 
 /** Roll-over text from the PRD (Part Summary "i" icon). */
 export function PriceModelInfo() {
@@ -69,8 +78,8 @@ export function PriceModelInfo() {
             the PO unit price.
           </li>
           <li>
-            Some parts have a price list in Odoo, sometimes volume dependent (e.g. over 25 pieces
-            the price is lower). QP uses the Odoo price list.
+            Some parts have a price list in Odoo with prices listed by order quantity. QP uses the
+            Odoo price list.
           </li>
           <li>Use the most recent price from a Sales Order.</li>
           <li>Use the QP price estimate. No other prices exist – maybe a new part.</li>
@@ -129,7 +138,12 @@ export function PricingModel({
         key: "PRICELIST" as const,
         label: "Odoo Price List",
         available: tier != null,
-        note: tier != null ? sources?.priceList?.priceListName || "Odoo" : "No price listed",
+        note:
+          tier != null
+            ? sources?.priceList?.priceListName || "Odoo"
+            : sources?.priceList?.tiers?.length
+              ? `No price listed for qty ${qty} (starts at ${sources.priceList.tiers[0]!.minQty})`
+              : "No price listed",
         viewable: false,
       },
       {
@@ -232,12 +246,12 @@ export function PricingModel({
     }
   };
 
-  const summary = (label: string, price: number | null, extra?: string) => (
+  const summary = (label: string, price: number | null, extra?: string, cur?: string | null) => (
     <div className="rounded-lg bg-sky-50 p-4 dark:bg-sky-950/30">
       <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
         <div>
           <span className="block text-xs font-medium text-muted-foreground">{label}</span>
-          <span className="text-3xl font-bold tabular-nums">{money(price)}</span>
+          <span className="text-3xl font-bold tabular-nums">{money(price, cur)}</span>
           <span className="block text-xs text-muted-foreground">
             Unit Price{extra ? ` · ${extra}` : ""}
           </span>
@@ -250,10 +264,10 @@ export function PricingModel({
         <div>
           <span className="block text-xs text-muted-foreground">Extended Price</span>
           <span className="text-2xl font-bold tabular-nums">
-            {price != null ? money(price * qty) : "—"}
+            {price != null ? money(price * qty, cur) : "—"}
           </span>
           <span className="block text-xs text-muted-foreground">
-            {qty} × {money(price)}
+            {qty} × {money(price, cur)}
           </span>
         </div>
       </div>
@@ -417,7 +431,16 @@ export function PricingModel({
               ? `Selected Unit Price (${tier.minQty}${tier.maxQty ? ` – ${tier.maxQty}` : "+"})`
               : "Selected Unit Price",
             tier?.unitPrice ?? null,
+            sources?.priceList?.currency
+              ? `Price list currency ${sources.priceList.currency}`
+              : undefined,
+            sources?.priceList?.currency,
           )}
+          {!(sources?.priceList?.tiers ?? []).length && sources?.priceList?.reason ? (
+            <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {sources.priceList.reason}
+            </p>
+          ) : null}
           <div className="overflow-x-auto rounded border border-border">
             <table className="w-full text-left text-xs">
               <thead className="bg-muted/60 text-muted-foreground">
@@ -439,7 +462,9 @@ export function PricingModel({
                         {t.minQty}
                         {t.maxQty ? ` – ${t.maxQty}` : "+"}
                       </td>
-                      <td className="px-3 py-2">{money(t.unitPrice)}</td>
+                      <td className="px-3 py-2">
+                        {money(t.unitPrice, sources?.priceList?.currency)}
+                      </td>
                       <td className="px-3 py-2">
                         {applied ? (
                           <Badge className="bg-green-100 text-green-800">Applied</Badge>
