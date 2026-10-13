@@ -143,7 +143,9 @@ export function PricingModel({
             ? sources?.priceList?.priceListName || "Odoo"
             : sources?.priceList?.tiers?.length
               ? `No price listed for qty ${qty} (starts at ${sources.priceList.tiers[0]!.minQty})`
-              : "No price listed",
+              : sources?.priceList?.reason
+                ? `No price listed – ${sources.priceList.reason}`
+                : "No price listed",
         viewable: false,
       },
       {
