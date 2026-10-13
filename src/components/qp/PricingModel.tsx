@@ -84,7 +84,8 @@ function tierFor(priceList: PriceListData | null | undefined, qty: number) {
   const tiers = priceList?.tiers ?? [];
   if (!tiers.length) return null;
   const applicable = tiers.filter((t) => t.minQty <= qty);
-  return applicable.length ? applicable[applicable.length - 1]! : tiers[0]!;
+  // No rule below the first threshold: the price list does not apply for this quantity.
+  return applicable.length ? applicable[applicable.length - 1]! : null;
 }
 
 export function PricingModel({

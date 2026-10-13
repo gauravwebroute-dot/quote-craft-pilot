@@ -217,72 +217,83 @@ export function buildPricingHistory(priorQuotes, partner) {
     }));
 }
 
-// Odoo customer price list: the pricelist assigned to the customer, filtered to fixed-price rules for
-// this part number. Returns quantity tiers (min..next min-1) or null when nothing is listed.
-// Never throws: pricelists are optional in Odoo.
+// Odoo customer price list: the pricelist assigned to the customer, reduced to quantity tiers for this
+// part. Supports fixed-price rules and percentage-discount rules (e.g. "10% off from 50 pcs"), applied to
+// the product's sales price like Odoo does. Rules are picked by Odoo's specificity order (variant >
+// product > category > global). Returns tiers (min..next min-1) or null. Never throws: pricelists are
+// optional in Odoo.
 async function fetchPriceList(uid, partner, part) {
   try {
     const pn = String(part.partNumber).trim();
     const key = normalizeKey(pn);
     if (!key) return null;
-    const [partnerRec] = await odooCall("object", "execute_kw", [
-      process.env.ODOO_DB,
-      uid,
-      process.env.ODOO_API_KEY,
-      "res.partner",
-      "read",
-      [[partner.id]],
-      { fields: ["property_product_pricelist"] },
-    ]);
+    const call = (model, method, args, kwargs = {}) =>
+      odooCall("object", "execute_kw", [process.env.ODOO_DB, uid, process.env.ODOO_API_KEY, model, method, args, kwargs]);
+
+    const [partnerRec] = await call("res.partner", "read", [[partner.id]], {
+      fields: ["property_product_pricelist"],
+    });
     const plId = partnerRec?.property_product_pricelist?.[0];
     if (!plId) return null;
-    const items = await odooCall("object", "execute_kw", [
-      process.env.ODOO_DB,
-      uid,
-      process.env.ODOO_API_KEY,
+
+    // The part must exist as an Odoo product (internal reference = part number).
+    const found = await call("product.product", "search_read", [[["default_code", "ilike", pn]]], {
+      fields: ["id", "default_code", "product_tmpl_id", "lst_price"],
+      limit: 10,
+    });
+    const products = (found || []).filter((p) => normalizeKey(p.default_code) === key);
+    if (products.length === 0) return null;
+    const variantIds = products.map((p) => p.id);
+    const tmplIds = products.map((p) => p.product_tmpl_id?.[0]).filter(Boolean);
+    const basePrice = Number(products[0].lst_price) || 0;
+
+    const items = await call(
       "product.pricelist.item",
       "search_read",
       [
         [
           ["pricelist_id", "=", plId],
-          ["compute_price", "=", "fixed"],
           "|",
           "|",
-          ["product_id.default_code", "ilike", pn],
-          ["product_tmpl_id.default_code", "ilike", pn],
-          ["product_tmpl_id.name", "ilike", pn],
+          ["product_id", "in", variantIds],
+          ["product_tmpl_id", "in", tmplIds],
+          ["applied_on", "=", "3_global"],
         ],
       ],
       {
-        fields: ["min_quantity", "fixed_price", "date_start", "date_end", "product_id", "product_tmpl_id"],
-        limit: 50,
+        fields: ["min_quantity", "compute_price", "fixed_price", "percent_price", "applied_on", "date_start", "date_end"],
+        limit: 100,
       },
-    ]);
+    );
     const today = new Date().toISOString().slice(0, 10);
+    const rank = { "0_product_variant": 0, "1_product": 1, "2_product_category": 2, "3_global": 3 };
     const rows = (items || [])
       .filter((i) => {
-        const label = `${i.product_id?.[1] ?? ""} ${i.product_tmpl_id?.[1] ?? ""}`;
         const start = i.date_start ? String(i.date_start).slice(0, 10) : null;
         const end = i.date_end ? String(i.date_end).slice(0, 10) : null;
-        return (
-          normalizeKey(label).includes(key) &&
-          Number(i.fixed_price) > 0 &&
-          (!start || start <= today) &&
-          (!end || end >= today)
-        );
+        return (!start || start <= today) && (!end || end >= today);
       })
-      .map((i) => ({ minQty: Number(i.min_quantity) || 0, unitPrice: Number(i.fixed_price) }))
-      .sort((a, b) => a.minQty - b.minQty);
-    // one price per quantity threshold (later rule for the same threshold wins)
+      .map((i) => {
+        let unitPrice = null;
+        if (i.compute_price === "fixed") unitPrice = Number(i.fixed_price);
+        else if (i.compute_price === "percentage" && basePrice > 0)
+          unitPrice = Math.round(basePrice * (1 - (Number(i.percent_price) || 0) / 100) * 100) / 100;
+        return { minQty: Math.max(1, Number(i.min_quantity) || 1), unitPrice, rank: rank[i.applied_on] ?? 9 };
+      })
+      .filter((r) => r.unitPrice != null && r.unitPrice > 0)
+      .sort((a, b) => a.minQty - b.minQty || a.rank - b.rank);
+    // one price per quantity threshold: the most specific rule wins
     const byMin = new Map();
-    for (const r of rows) byMin.set(r.minQty, r);
+    for (const r of rows) if (!byMin.has(r.minQty)) byMin.set(r.minQty, r);
     const tiers = Array.from(byMin.values());
     if (tiers.length === 0) return null;
+    // Below the first rule Odoo falls back to the product's sales price.
+    if (tiers[0].minQty > 1 && basePrice > 0) tiers.unshift({ minQty: 1, unitPrice: basePrice, rank: 99 });
     return {
       priceListName: partnerRec.property_product_pricelist?.[1] ?? null,
       tiers: tiers.map((t, i) => ({
-        minQty: t.minQty < 1 ? 1 : t.minQty,
-        maxQty: tiers[i + 1] ? Math.max(1, tiers[i + 1].minQty - 1) : null,
+        minQty: t.minQty,
+        maxQty: tiers[i + 1] ? tiers[i + 1].minQty - 1 : null,
         unitPrice: t.unitPrice,
       })),
     };
