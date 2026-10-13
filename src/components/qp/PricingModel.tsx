@@ -314,7 +314,10 @@ export function PricingModel({
               </span>
               <span className="min-w-0">
                 <span className="block truncate">{o.label}</span>
-                <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                <span
+                  className="block whitespace-normal break-words text-[11px] font-normal text-muted-foreground"
+                  title={o.note}
+                >
                   ({o.note})
                 </span>
               </span>

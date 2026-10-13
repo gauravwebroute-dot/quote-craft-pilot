@@ -320,7 +320,7 @@ export async function fetchPriceList(uid, partnerHint, part, companyId, customer
     // use the first assigned pricelist that actually lists this part
     const plId = [...ids].find((id) => valid.some((i) => i.pricelist_id?.[0] === id));
     if (!plId) {
-      return empty(`No fixed price for ${pn} in price list "${[...names.values()].join(", ")}"`, {
+      return empty(`No fixed price for ${pn} in the price list assigned to this customer ("${[...names.values()].join(", ")}"). Assign the price list that holds the rules (Contact > Sales & Purchase > Pricelist)`, {
         priceListName: [...names.values()][0] ?? null,
       });
     }
