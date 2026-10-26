@@ -3,7 +3,7 @@ import multer from "multer";
 import { extractFromFiles } from "../services/extractionProvider.js";
 import { calculateSurfaceArea, estimateSowArea, DEFAULT_BENT_FACTOR } from "../services/areaCalculator.js";
 import { analyzeStep, isStepFile } from "../services/cadStep.js";
-import { extractPurchaseOrder, isSpreadsheetFile, spreadsheetToText } from "../services/poExtraction.js";
+import { extractPurchaseOrder, isSpreadsheetFile, spreadsheetToText, classifyDocument } from "../services/poExtraction.js";
 
 const router = Router();
 
@@ -168,13 +168,13 @@ router.post(
   async (req, res) => {
   try {
     const uploadedFiles = req.files?.files ?? [];
-    const poUploads = req.files?.poFiles ?? [];
+    const poUploadsDirect = req.files?.poFiles ?? [];
     const emailText = typeof req.body?.emailText === "string" ? req.body.emailText.trim() : "";
     const model = typeof req.body?.model === "string" ? req.body.model.trim() : undefined;
     const bentRaw = Number(req.body?.bentFactor);
     const globalBentFactor = Number.isFinite(bentRaw) && bentRaw >= 1 && bentRaw <= 3 ? bentRaw : DEFAULT_BENT_FACTOR;
 
-    if (uploadedFiles.length === 0 && poUploads.length === 0 && !emailText) {
+    if (uploadedFiles.length === 0 && poUploadsDirect.length === 0 && !emailText) {
       return res.status(400).json({
         error: "BAD_REQUEST",
         message: "Provide at least one drawing, purchase order, or request text.",
@@ -183,7 +183,26 @@ router.post(
 
     // STEP/STP solids are measured with OpenCascade (real surface area); everything else goes to the model.
     const stepUploads = uploadedFiles.filter(isStepFile);
-    const visionUploads = uploadedFiles.filter((f) => !isStepFile(f));
+    const nonStepUploads = uploadedFiles.filter((f) => !isStepFile(f));
+
+    // The drawings box also accepts customer scopes of work / order documents. Recognise those PDFs
+    // (only when clearly not a drawing) and read them with the order/SOW extractor instead.
+    const recognisedDocs = [];
+    const classified = await Promise.all(
+      nonStepUploads.map((f) =>
+        f.mimetype === "application/pdf"
+          ? classifyDocument({ base64: f.buffer.toString("base64"), mediaType: f.mimetype, filename: f.originalname }, model)
+          : { documentType: "ENGINEERING_DRAWING", confidence: "LOW" },
+      ),
+    );
+    const visionUploads = nonStepUploads.filter((f, i) => {
+      const c = classified[i];
+      const isOrderDoc =
+        (c.documentType === "SCOPE_OF_WORK" || c.documentType === "PURCHASE_ORDER") && c.confidence === "HIGH";
+      if (isOrderDoc) recognisedDocs.push({ file: f, kind: c.documentType });
+      return !isOrderDoc;
+    });
+    const poUploads = [...poUploadsDirect, ...recognisedDocs.map((d) => d.file)];
     const cadResults = [];
     for (const f of stepUploads) {
       try {
@@ -223,6 +242,12 @@ router.post(
     extraction.customer = extraction.customer ?? {};
     extraction.parts = Array.isArray(extraction.parts) ? extraction.parts : [];
     extraction.extractionNotes = extraction.extractionNotes ?? [];
+
+    for (const d of recognisedDocs) {
+      extraction.extractionNotes.push(
+        `"${d.file.originalname}" was uploaded as a drawing but recognised as a ${d.kind === "SCOPE_OF_WORK" ? "scope of work" : "purchase order"}; it was read as one (no drawing views).`,
+      );
+    }
 
     // Purchase orders / order details: capture lines + listed unit prices and link them to parts.
     if (poUploads.length > 0) {

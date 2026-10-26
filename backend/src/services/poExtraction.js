@@ -296,3 +296,71 @@ export async function extractPurchaseOrder(files, modelName) {
   }
   return normalizePurchaseOrder(parsed, files.map((f) => f.filename));
 }
+
+
+const CLASSIFY_TOOL = {
+  type: "function",
+  function: {
+    name: "record_document_type",
+    description: "Record what kind of document was uploaded.",
+    parameters: {
+      type: "object",
+      properties: {
+        documentType: { type: "string", enum: ["ENGINEERING_DRAWING", "SCOPE_OF_WORK", "PURCHASE_ORDER", "OTHER"] },
+        confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
+      },
+      required: ["documentType", "confidence"],
+    },
+  },
+};
+
+const CLASSIFY_PROMPT = `Classify the uploaded document for a coating shop.
+- ENGINEERING_DRAWING: a part drawing / print with a title block and geometry views (any number of sheets), or a CAD drawing.
+- SCOPE_OF_WORK: a customer document that lists parts, requirements and finishing specs in text/tables (sizes, specs, colours, notes) instead of drawing the parts.
+- PURCHASE_ORDER: an order document with order lines (part numbers, quantities, possibly prices).
+- OTHER: anything else.
+Say HIGH confidence only when it is unmistakable.`;
+
+/** Returns { documentType, confidence } for a PDF; any failure means "treat it as a drawing". */
+export async function classifyDocument(file, modelName) {
+  const fallback = { documentType: "ENGINEERING_DRAWING", confidence: "LOW" };
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey || file.mediaType !== "application/pdf") return fallback;
+  const model = modelName || process.env.DEFAULT_EXTRACTION_MODEL || "~google/gemini-flash-latest";
+  try {
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://quotepilot.app",
+        "X-Title": "QuotePilot Document Classifier",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: CLASSIFY_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "file", file: { filename: file.filename, file_data: `data:application/pdf;base64,${file.base64}` } },
+              { type: "text", text: `(filename: ${file.filename}) Classify this document with the record_document_type tool.` },
+            ],
+          },
+        ],
+        tools: [CLASSIFY_TOOL],
+        tool_choice: { type: "function", function: { name: "record_document_type" } },
+        plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }],
+      }),
+    });
+    if (!response.ok) return fallback;
+    const result = await response.json();
+    const args = result.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    const parsed = typeof args === "string" ? JSON.parse(args) : args;
+    if (!parsed?.documentType) return fallback;
+    return { documentType: parsed.documentType, confidence: parsed.confidence ?? "LOW" };
+  } catch {
+    return fallback;
+  }
+}
