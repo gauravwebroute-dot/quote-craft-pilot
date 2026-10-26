@@ -10,7 +10,7 @@ const router = Router();
 // (or manually filled in, e.g. after an estimator supplies area by hand).
 router.post("/price", (req, res) => {
   try {
-    const { parts, rateCard: rateCardOverride, adjustments } = req.body ?? {};
+    const { parts, rateCard: rateCardOverride, adjustments, quoteOptions } = req.body ?? {};
 
     if (!Array.isArray(parts) || parts.length === 0) {
       return res.status(400).json({
@@ -35,14 +35,18 @@ router.post("/price", (req, res) => {
     const chemFilmCharge = chemFilmRequested
       ? Math.max(rateCard.chemFilm.minimumLotFee, chemFilmCalculated)
       : 0;
+    const cocRequired = quoteOptions?.certificateRequired === true;
+    const cocRate = Number(rateCard.extras?.certificateOfConformanceFlat) || 0;
+    const cocCharge = cocRequired ? cocRate : 0;
     const quoteTotal = round2(
-      pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) + chemFilmCharge,
+      pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) + chemFilmCharge + cocCharge,
     );
     const unpricedCount = results.length - pricedResults.length;
 
     return res.status(200).json({
       results,
       quoteTotal,
+      certificateOfConformance: { required: cocRequired, rate: cocRate, charge: round2(cocCharge) },
       chemFilm: {
         requested: chemFilmRequested,
         totalAreaSqIn: round2(totalAreaSqIn),
@@ -73,6 +77,7 @@ function mergeRateCard(base, override) {
     mediaBlasting: { ...base.mediaBlasting, ...override.mediaBlasting },
     coating: { ...base.coating, ...override.coating },
     chemFilm: { ...base.chemFilm, ...override.chemFilm },
+    extras: { ...base.extras, ...override.extras },
     adjustments: { ...base.adjustments, ...override.adjustments },
   };
 }

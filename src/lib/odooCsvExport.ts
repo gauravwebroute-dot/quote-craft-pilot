@@ -66,11 +66,19 @@ export function mapQuotePilotToOdooCsv(
       maskingSqIn > 0 ||
       Boolean(part.dimensions?.holes && part.dimensions.holes.length > 0);
 
-    const workType = part.coatingBom?.topcoat?.toLowerCase().includes("cerakote")
-      ? "Cerakote"
-      : part.coatingBom?.topcoat || "Coating";
+    const workType =
+      part.coatingBom?.process ||
+      (part.coatingBom?.topcoat?.toLowerCase().includes("cerakote")
+        ? "Cerakote"
+        : part.coatingBom?.topcoat) ||
+      "Coating";
 
-    const pricePerSi = isMaskingNeeded ? 0.46 : 0.4;
+    // Rates come from the pricing engine's rate card (never typed in here).
+    const rates = (priced as { rates?: { coatingPerSi?: number; maskingPerSi?: number } }).rates;
+    const pricePerSi =
+      typeof rates?.coatingPerSi === "number"
+        ? Math.round((rates.coatingPerSi + (isMaskingNeeded ? (rates.maskingPerSi ?? 0) : 0)) * 100) / 100
+        : "";
 
     const baseName = part.partName || part.partSummary || part.partNumber || "Coating Line Item";
     const partNumber = part.partNumber || "";

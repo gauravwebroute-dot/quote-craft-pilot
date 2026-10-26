@@ -35,6 +35,14 @@ export const DEFAULT_RATE_CARD = {
 
   partMarkCostEach: 1.0,
 
+  // Optional add-ons the customer's document can require. Rates are NOT defined yet, so they default
+  // to 0 (the requirement is shown on the quote but adds no charge) until set here or via env vars.
+  extras: {
+    partMarkingPerPart: Number(process.env.RATE_PART_MARKING) || 0, // $ per piece
+    packagingPerPart: Number(process.env.RATE_SPECIAL_PACKAGING) || 0, // $ per piece
+    certificateOfConformanceFlat: Number(process.env.RATE_CERT_OF_CONFORMANCE) || 0, // $ per quote
+  },
+
   adjustments: {
     rushOrderPct: 0.0, // 0.0%
     setupExtraWorkPct: 0.0, // 0.0%

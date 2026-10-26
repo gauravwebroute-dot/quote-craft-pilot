@@ -77,16 +77,19 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const materialOz = Math.round(totalArea * materialOzPerSqIn * 1000) / 1000;
 
   const rawColor = part.coatingBom?.color || part.coatingBom?.topcoat || "";
-  // Name the real process (e.g. "Powder Coat") instead of always saying Cerakote.
-  const processText = String(part.coatingBom?.process || part.coatingBom?.topcoat || "");
-  const isPowder = /powder/i.test(processText);
+  // Process name comes from the customer's document (coatingBom.process); the rate card name is only the shop default.
+  const docProcess = String(part.coatingBom?.process ?? "").trim();
+  const processLabel = docProcess || String(rc.coating?.processName ?? "Coating").replace(/\s*(coating\s*)?process$/i, "").trim() || "Coating";
+  // Prefix the process unless the colour text already starts with it (e.g. "Cerakote H-146 ...").
   const colorComplexity = rawColor
-    ? `${isPowder ? "Powder Coat" : "Cerakote"} ${rawColor}`.replace(/^(Powder Coat|Cerakote) \1/i, "$1")
-    : (rc.coating?.defaultColorComplexity || "TBD – Cerakote Camo Green FED-STD-595");
+    ? new RegExp(`^${processLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(rawColor)
+      ? rawColor
+      : `${processLabel} ${rawColor}`
+    : (rc.coating?.defaultColorComplexity || "TBD");
   const ovenTime = rc.coating?.defaultOvenTime || "TBD";
 
   const coating = {
-    processName: rc.coating?.processName || "Cerakote Coating Process",
+    processName: docProcess ? `${docProcess} Process` : rc.coating?.processName || `${processLabel} Process`,
     totalArea: round2(totalArea),
     timeMinutes: coatTime,
     timeText: `${coatTime} min/unit`,
@@ -126,7 +129,33 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const chemFilmCalculated = round2(totalArea * quantity * chemFilmRate);
   const chemFilmCharge = chemFilmRequested ? Math.max(chemFilmMinFee, chemFilmCalculated) : 0;
 
+  // Marking / special packaging required by the customer's document (rates configurable, default 0).
+  const markRate = Number(rc.extras?.partMarkingPerPart) || 0;
+  const partMarkApplied = part.partMark === true;
+  const partMarkCost = partMarkApplied ? round2(markRate) : 0;
+  const pkgRate = Number(rc.extras?.packagingPerPart) || 0;
+  const packagingApplied = Boolean(part.packagingNote);
+  const packagingCost = packagingApplied ? round2(pkgRate) : 0;
+
   const adjustments = {
+    partMarking: {
+      applied: partMarkApplied,
+      cost: partMarkCost,
+      text: !partMarkApplied
+        ? "Not required"
+        : markRate > 0
+          ? `+$${partMarkCost.toFixed(2)} per piece`
+          : "Required - rate not set ($0.00)",
+    },
+    packaging: {
+      applied: packagingApplied,
+      cost: packagingCost,
+      text: !packagingApplied
+        ? "Standard"
+        : pkgRate > 0
+          ? `+$${packagingCost.toFixed(2)} per piece`
+          : "Special packaging required - rate not set ($0.00)",
+    },
     chemFilm: {
       applied: chemFilmRequested,
       charge: chemFilmCharge,
@@ -163,7 +192,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     },
   };
 
-  const calculatedUnitPrice = round2(directCost + rushOrderCost + setupCost + shippingCost - discountCost + overheadProfitCost);
+  const calculatedUnitPrice = round2(directCost + rushOrderCost + setupCost + shippingCost - discountCost + overheadProfitCost + partMarkCost + packagingCost);
   const minPrice = rc.minimumPricePerUnit ?? 5.0;
   const estimatedPricePerUnit = round2(Math.max(minPrice, calculatedUnitPrice));
   // Operator chose to reuse the last confirmed price for this customer + part (see Odoo cross-check).
@@ -175,6 +204,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
 
   // --- Pricing Summary for UI ---
   const summary = {
+    processLabel,
     cerakoteWithoutMasking: `$${coatRate.toFixed(2)}/SI`,
     cerakoteWithMasking: `$${(coatRate + maskingRate).toFixed(2)}/SI`,
     mediaBlasting: "Included ($0.00/SI)",
@@ -203,6 +233,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     },
     adjustments,
     summary,
+    rates: { coatingPerSi: coatRate, maskingPerSi: maskingRate },
     totals: {
       baseCost: directCost,
       calculatedPrice: calculatedUnitPrice,
