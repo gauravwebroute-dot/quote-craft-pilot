@@ -36,6 +36,13 @@ import { Field, KV, SubSection } from "./bits";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ExtractionResult, ExtractionPart } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import {
+  DEFAULT_BENT_FACTOR,
+  bentFactorPatch,
+  clampBentFactor,
+  manualAreaPatch,
+} from "@/lib/sowArea";
+import { Input } from "@/components/ui/input";
 import { commitQuote } from "@/lib/quoteCommit";
 import {
   PricingModel,
@@ -149,6 +156,10 @@ function renderConfidenceBadge(tier?: string | null) {
   return <Badge variant={variant}>{tier} confidence</Badge>;
 }
 
+function parts_forSow(parts: ExtractionPart[]): ExtractionPart[] {
+  return parts.filter((p) => p.areaSource === "sow_estimate" && p.sowDimensions);
+}
+
 // Reusable Pricing Item Group with clean bold headers (doubled font size per PRD v2 Item 3) and small-print parentheticals
 function PricingGroupCard({
   title,
@@ -203,6 +214,10 @@ interface PartDetailCardProps {
   uploadedFiles?: File[] | undefined;
   onOpenDrawing?: (drawingName?: string | null) => void;
   onBackToSummary?: (() => void) | undefined;
+  /** Uploaded purchase order / scope-of-work files (blob URLs) for the "Source documents" card. */
+  poDocuments?: PricingDocument[];
+  onPatch?: ((patch: PartPatch) => void) | undefined;
+  globalBentFactor?: number;
 }
 
 function PartDetailCard({
@@ -213,7 +228,12 @@ function PartDetailCard({
   uploadedFiles = [],
   onOpenDrawing,
   onBackToSummary,
+  poDocuments = [],
+  onPatch,
+  globalBentFactor = DEFAULT_BENT_FACTOR,
 }: PartDetailCardProps) {
+  const [manualArea, setManualArea] = useState("");
+  const [bentInput, setBentInput] = useState("");
   const [activeTab, setActiveTab] = useState<string>("spec");
 
   const partNumber = part.partNumber || `Part #${index + 1}`;
@@ -422,6 +442,17 @@ function PartDetailCard({
                 {part.estimationMethod && (
                   <Field label="Estimation Method" editable={false} value={part.estimationMethod} />
                 )}
+                {part.areaSource === "none" || (part.areaSource == null && totalArea === 0) ? (
+                  <Field
+                    label="Area Status"
+                    editable={false}
+                    warn
+                    value={
+                      part.areaUnknownReason ||
+                      "Surface area could not be determined from the uploaded documents."
+                    }
+                  />
+                ) : null}
                 <Field label="Coating Area (Sq In)" value={`${coatingSqIn} sq in`} />
                 <Field label="Masking Area (Sq In)" value={`${maskingSqIn} sq in`} />
                 {part.dimensions?.shapeType ? (
@@ -433,6 +464,96 @@ function PartDetailCard({
                 ) : null}
               </div>
             </SubSection>
+
+            {part.sowDimensions || part.areaSource === "none" || part.areaSource === "manual" ? (
+              <SubSection title="Surface Area Review (Scope of Work)" tone="muted">
+                <p className="mb-3 text-xs text-muted-foreground">
+                  {part.sowDimensions
+                    ? `Size from the scope of work: ${part.sowDimensions.printed ?? `${part.sowDimensions.lengthIn}" x ${part.sowDimensions.widthIn}"`}. `
+                    : "No size was found in the uploaded documents. "}
+                  Area is an estimate until a drawing or flat pattern is available - adjust it here
+                  and pricing updates automatically.
+                </p>
+                <div className="flex flex-wrap items-end gap-4">
+                  {part.sowDimensions ? (
+                    <div className="space-y-1">
+                      <Label className="text-xs">
+                        Bent-factor (this part) · global {globalBentFactor}
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={3}
+                          step={0.01}
+                          className="h-8 w-28"
+                          placeholder={String(part.bentFactor ?? globalBentFactor)}
+                          value={bentInput}
+                          onChange={(e) => setBentInput(e.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!bentInput}
+                          onClick={() => {
+                            onPatch?.(
+                              bentFactorPatch(
+                                part.sowDimensions!,
+                                clampBentFactor(Number(bentInput)),
+                                { override: true, masking: maskingSqIn },
+                              ),
+                            );
+                            setBentInput("");
+                          }}
+                        >
+                          Apply to this part
+                        </Button>
+                        {part.bentFactorOverride ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              onPatch?.(
+                                bentFactorPatch(part.sowDimensions!, globalBentFactor, {
+                                  override: false,
+                                  masking: maskingSqIn,
+                                }),
+                              )
+                            }
+                          >
+                            Use global
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Enter surface area manually (sq in)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        className="h-8 w-32"
+                        value={manualArea}
+                        onChange={(e) => setManualArea(e.target.value)}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!(Number(manualArea) > 0)}
+                        onClick={() => {
+                          onPatch?.(manualAreaPatch(Number(manualArea), maskingSqIn));
+                          setManualArea("");
+                        }}
+                      >
+                        Set area
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </SubSection>
+            ) : null}
 
             {/* Preserved BOM Items SubSection (Per PRD v4: Preserve BOM separately) */}
             {part.bomItems && part.bomItems.length > 0 && (
@@ -692,6 +813,42 @@ function PartDetailCard({
                     </span>
                   </div>
                 </div>
+
+                {/* Source documents (moved here from the Part Summary) */}
+                {poDocuments.length > 0 || (uploadedFiles && uploadedFiles.length > 0) ? (
+                  <div className="rounded-lg border border-border bg-card p-4 shadow-2xs">
+                    <h4 className="mb-2 text-base font-bold text-foreground">Source Documents</h4>
+                    <ul className="space-y-1.5 text-sm">
+                      {poDocuments.map((d) => (
+                        <li key={d.url} className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="truncate text-muted-foreground">{d.name}</span>
+                          <a
+                            href={d.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="size-3.5" /> View original document
+                          </a>
+                        </li>
+                      ))}
+                      {onOpenDrawing && uploadedFiles && uploadedFiles.length > 0 ? (
+                        <li className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="truncate text-muted-foreground">
+                            {part.sourceDrawingFile || uploadedFiles[0]?.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onOpenDrawing(part.sourceDrawingFile)}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="size-3.5" /> View original drawing
+                          </button>
+                        </li>
+                      ) : null}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             </SubSection>
           </TabsContent>
@@ -948,6 +1105,36 @@ export function SectionExtraction({
     }
   };
 
+  // Scope-of-work parts whose area is an estimate (bent-factor applies to these).
+  const sowParts = parts_forSow(extraction?.parts ?? []);
+  const [globalBentFactor, setGlobalBentFactor] = useState<number>(DEFAULT_BENT_FACTOR);
+  const [globalBentInput, setGlobalBentInput] = useState<string>(String(DEFAULT_BENT_FACTOR));
+  useEffect(() => {
+    const first = (extraction?.parts ?? []).find((p) => p.areaSource === "sow_estimate" && p.bentFactor);
+    if (first?.bentFactor) {
+      setGlobalBentFactor(first.bentFactor);
+      setGlobalBentInput(String(first.bentFactor));
+    }
+    // only when a new extraction arrives
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extraction?.extractionNotes?.length, extraction?.parts?.length]);
+  const applyGlobalBent = () => {
+    const f = clampBentFactor(Number(globalBentInput));
+    setGlobalBentFactor(f);
+    setGlobalBentInput(String(f));
+    (extraction?.parts ?? []).forEach((p, i) => {
+      if (p.sowDimensions && p.areaSource === "sow_estimate" && !p.bentFactorOverride) {
+        onPatchPart?.(
+          i,
+          bentFactorPatch(p.sowDimensions, f, {
+            override: false,
+            masking: Number(p.maskingAreaSqIn) || 0,
+          }),
+        );
+      }
+    });
+  };
+
   // Determine active part if focused on a specific part ID
   let selectedPartIndex = -1;
   if (focusedSection.startsWith("part-")) {
@@ -999,7 +1186,23 @@ export function SectionExtraction({
       summary: part.partSummary || "",
       revision: part.revision || "N/A",
       workType,
-      area: displayArea === 0 ? "Unknown" : `${displayArea} sq in`,
+      area:
+        displayArea === 0
+          ? "Unknown"
+          : `${part.areaSource === "sow_estimate" ? "≈ " : ""}${displayArea} sq in`,
+      areaTag:
+        part.areaSource === "sow_estimate"
+          ? "est. from SOW size"
+          : part.areaSource === "manual"
+            ? "entered manually"
+            : displayArea === 0
+              ? "no size / drawing"
+              : "",
+      areaTitle:
+        displayArea === 0
+          ? part.areaUnknownReason ||
+            "Surface area could not be determined: no drawing and no dimensions were found in the uploaded documents."
+          : part.reasoningSummary || "",
       priceModel:
         part.priceSource === "PO"
           ? "Purchase Order"
@@ -1123,6 +1326,9 @@ export function SectionExtraction({
           uploadedFiles={uploadedFiles}
           onOpenDrawing={handleOpenDrawing}
           onBackToSummary={() => onSelectSection?.("summary")}
+          poDocuments={poDocuments}
+          onPatch={(patch) => onPatchPart?.(selectedPartIndex, patch)}
+          globalBentFactor={globalBentFactor}
         />
       ) : (
         <>
@@ -1220,6 +1426,36 @@ export function SectionExtraction({
                 </div>
               </div>
 
+              {sowParts.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-3 border-b border-border bg-amber-50/60 px-4 py-2.5 text-xs dark:bg-amber-950/20 sm:px-6">
+                  <span className="font-semibold">
+                    Surface areas for {sowParts.length} part{sowParts.length === 1 ? "" : "s"} are
+                    estimated from the scope-of-work sizes.
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Label htmlFor="global-bent" className="text-xs">
+                      Bent-factor (all parts)
+                    </Label>
+                    <Input
+                      id="global-bent"
+                      type="number"
+                      min={1}
+                      max={3}
+                      step={0.01}
+                      className="h-7 w-20"
+                      value={globalBentInput}
+                      onChange={(e) => setGlobalBentInput(e.target.value)}
+                    />
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={applyGlobalBent}>
+                      Apply
+                    </Button>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Parts with a manual override keep their own value.
+                  </span>
+                </div>
+              ) : null}
+
               <CardContent className="p-0">
                 {/* Table Layout - Wide and responsive with no horizontal scrolling on 1024px+ viewports */}
                 <div className="w-full overflow-x-auto">
@@ -1287,8 +1523,16 @@ export function SectionExtraction({
                             <td className="border-r border-slate-200 px-1.5 py-3.5 text-center font-mono text-xs">
                               {row.revision}
                             </td>
-                            <td className="border-r border-slate-200 px-2 py-3.5 text-right tabular-nums">
+                            <td
+                              className="border-r border-slate-200 px-2 py-3.5 text-right tabular-nums"
+                              title={row.areaTitle}
+                            >
                               {row.area}
+                              {row.areaTag ? (
+                                <span className="block text-[10px] font-normal text-muted-foreground">
+                                  {row.areaTag}
+                                </span>
+                              ) : null}
                             </td>
                             <td className="border-r border-slate-200 px-2 py-3.5">
                               <span className="inline-block rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
@@ -1348,6 +1592,7 @@ export function SectionExtraction({
             <div className="space-y-4">
               {parts.map((part, index) => (
                 <PricingModel
+                  headless
                   key={`${part.partNumber ?? "part"}-${index}`}
                   part={part}
                   sources={sources[index]}
