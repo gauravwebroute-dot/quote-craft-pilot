@@ -286,6 +286,21 @@ router.get("/quotes/:id", async (req, res) => {
   }
 });
 
+// Database connectivity check: open /api/quotes/db-status in a browser to see whether the backend can reach its database.
+router.get("/quotes/db-status", async (_req, res) => {
+  try {
+    const next = await defaultQuoteStore.getCurrentDraftSequenceId();
+    return res.json({ ok: true, nextDraftSequenceId: next });
+  } catch (error) {
+    return res.status(503).json({
+      ok: false,
+      error: "DB_UNREACHABLE",
+      detail: error instanceof Error ? error.message : String(error),
+      hint: "If this says 'fetch failed', the backend cannot reach Supabase: check SUPABASE_URL / SUPABASE_KEY on the server and that the Supabase project is not paused.",
+    });
+  }
+});
+
 // Reset: wipes every saved quote in the app database and restarts numbering at QPyy-0001.
 // Requires the exact confirmation phrase. Never touches Odoo.
 router.post("/quotes/reset", async (req, res) => {

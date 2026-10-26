@@ -51,6 +51,8 @@ export type PurchaseOrderData = {
   documentTitle?: string | null | undefined;
   finishProcess?: string | null | undefined;
   declaredPartCount?: number | null | undefined;
+  certificateRequired?: boolean | null | undefined;
+  firstArticleRequired?: boolean | null | undefined;
   customerName: string | null;
   poNumber: string | null;
   poDate: string | null;

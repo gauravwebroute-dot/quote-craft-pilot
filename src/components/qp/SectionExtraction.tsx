@@ -99,6 +99,8 @@ export type PricingPartBreakdown = {
     };
   };
   adjustments?: {
+    partMarking?: { applied: boolean; cost: number; text: string };
+    packaging?: { applied: boolean; cost: number; text: string };
     chemFilm: {
       applied: boolean;
       charge: number;
@@ -134,6 +136,7 @@ export type PricingPartBreakdown = {
 
 export type PricingResponse = {
   quoteTotal: number;
+  certificateOfConformance?: { required: boolean; rate: number; charge: number };
   chemFilm: {
     requested: boolean;
     totalAreaSqIn: number;
@@ -708,6 +711,12 @@ function PartDetailCard({
                         value:
                           adjustments?.chemFilm?.text || "—",
                       },
+                      ...(adjustments?.partMarking?.applied
+                        ? [{ label: "Part marking", value: adjustments.partMarking.text }]
+                        : []),
+                      ...(adjustments?.packaging?.applied
+                        ? [{ label: "Special packaging", value: adjustments.packaging.text }]
+                        : []),
                       {
                         label: "Rush order",
                         value: adjustments?.rushOrder?.text || "—",
@@ -980,6 +989,7 @@ export function SectionExtraction({
       body: JSON.stringify({
         parts: extraction.parts,
         adjustments: { chemFilm: chemFilmRequested },
+        quoteOptions: { certificateRequired: extraction.purchaseOrder?.certificateRequired === true },
       }),
     })
       .then(async (response) => {
@@ -1174,7 +1184,12 @@ export function SectionExtraction({
       maskingSqIn > 0 ||
       Boolean(part.dimensions?.holes && part.dimensions.holes.length > 0);
 
-    const workType = part.coatingBom?.process || part.coatingBom?.topcoat || "Coating";
+    const workType =
+      part.coatingBom?.process ||
+      (part.coatingBom?.topcoat?.toLowerCase().includes("cerakote")
+        ? "Cerakote"
+        : part.coatingBom?.topcoat) ||
+      "Coating";
 
     const displayArea = coatingSqIn > 0 ? coatingSqIn : totalArea;
 
@@ -1566,6 +1581,18 @@ export function SectionExtraction({
                       )}
                     </tbody>
                     <tfoot>
+                      {pricing?.certificateOfConformance?.required ? (
+                        <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
+                          <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                            Certificate of conformance (required by customer)
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {pricing.certificateOfConformance.rate > 0
+                              ? formatMoney(pricing.certificateOfConformance.charge)
+                              : "Rate not set"}
+                          </td>
+                        </tr>
+                      ) : null}
                       <tr className="border-t-2 border-slate-300 bg-slate-50/80 dark:border-border dark:bg-muted/30">
                         <td colSpan={8} className="px-2 py-3.5 text-right font-bold tracking-wide">
                           TOTAL
