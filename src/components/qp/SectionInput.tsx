@@ -46,6 +46,11 @@ export type PoLine = {
 
 export type PurchaseOrderData = {
   fileNames: string[];
+  /** "SCOPE_OF_WORK" when the uploaded document is a customer SOW rather than a PO. */
+  documentType?: "PURCHASE_ORDER" | "SCOPE_OF_WORK" | "OTHER" | undefined;
+  documentTitle?: string | null | undefined;
+  finishProcess?: string | null | undefined;
+  declaredPartCount?: number | null | undefined;
   customerName: string | null;
   poNumber: string | null;
   poDate: string | null;
@@ -105,6 +110,23 @@ export type ExtractionPart = {
   /** Set when the operator chose to reuse the last confirmed Odoo price for this customer + part. */
   priceSource?: "PO" | "PRICELIST" | "HISTORY" | "QP_ESTIMATE" | "LAST_QUOTED" | undefined;
   priceOverrideUnit?: number | undefined;
+  /** Where the surface area came from: drawing, CAD model, scope-of-work estimate, manual entry or unknown. */
+  areaSource?: "drawing" | "cad" | "sow_estimate" | "manual" | "none" | undefined;
+  /** Why the area could not be determined (shown instead of a bare "Unknown"). */
+  areaUnknownReason?: string | undefined;
+  /** SOW size converted to inches (used to recompute area when the bent-factor changes). */
+  sowDimensions?:
+    | { lengthIn: number; widthIn: number; thicknessIn?: number | null; printed?: string }
+    | undefined;
+  sowFlatAreaSqIn?: number | undefined;
+  /** Multiplier for formed flanges / bends on top of the flat 2-face area. */
+  bentFactor?: number | undefined;
+  /** True when this part's bent-factor / area was set by hand and must ignore the global factor. */
+  bentFactorOverride?: boolean | undefined;
+  /** "SOW" when the part's specification came from a customer scope of work. */
+  specSource?: "SOW" | undefined;
+  quantityAssumed?: boolean | undefined;
+  packagingNote?: string | undefined;
 };
 
 export type ExtractionResult = {
@@ -532,7 +554,7 @@ export function SectionInput({
       <Card className="transition-colors hover:border-muted-foreground/30">
         <CardHeader>
           <CardTitle className="text-xl font-semibold">
-            Upload Purchase Orders / Order Details{" "}
+            Upload Purchase Order or Scope of Work (SOW){" "}
             <span className="text-sm font-normal text-muted-foreground">(optional)</span>
           </CardTitle>
         </CardHeader>
@@ -552,11 +574,12 @@ export function SectionInput({
             }}
           >
             <Upload className="size-7 text-muted-foreground" />
-            <p className="mt-2 text-base font-medium">Drop purchase orders / order details here</p>
+            <p className="mt-2 text-base font-medium">Drop a purchase order or scope of work here</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Upload POs or order documents on their own (repeat orders of existing parts) or
-              together with drawings. Unit prices are captured when the PO lists them. PDF, PNG,
-              JPEG, WEBP.
+              Upload a PO or a customer scope of work on its own (repeat orders, or jobs where the
+              customer gives sizes and finish requirements instead of drawings) or together with
+              drawings. Unit prices are captured when the PO lists them; sizes and finish
+              requirements are read from a SOW. PDF, PNG, JPEG, WEBP, Excel, CSV.
             </p>
             <input
               ref={poInputRef}
@@ -616,9 +639,9 @@ export function SectionInput({
       <Card className="transition-colors hover:border-muted-foreground/30">
         <CardHeader>
           <CardTitle className="text-xl font-semibold">
-            Upload Drawings{" "}
+            Upload Drawings / Scope of Work / Part Details{" "}
             <span className="text-sm font-normal text-muted-foreground">
-              (optional when a purchase order covers existing parts)
+              (optional when a purchase order or scope of work already lists the parts)
             </span>
           </CardTitle>
         </CardHeader>

@@ -148,7 +148,17 @@ function QuotePilot() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm: "RESET" }),
       });
-      if (!response.ok) throw new Error("Server reset failed.");
+      if (!response.ok) {
+        // Surface the server's real reason (disabled, database permission, unreachable...) instead of a generic message.
+        let reason = `Server responded ${response.status}.`;
+        try {
+          const body = await response.json();
+          reason = [body?.message, body?.detail].filter(Boolean).join(" - ") || reason;
+        } catch {
+          // non-JSON error page (e.g. the API is waking up or not deployed)
+        }
+        throw new Error(reason);
+      }
       const data = await response.json();
       const first = resetLocalQuoteData();
       const next = data?.nextDraftSequenceId || first;
@@ -163,7 +173,8 @@ function QuotePilot() {
       setFocusedSection("overview");
     } catch (err) {
       console.error("Reset failed:", err);
-      window.alert("Reset failed - the database was not cleared. Please try again.");
+      const why = err instanceof Error && err.message ? `\n\nReason: ${err.message}` : "";
+      window.alert(`Reset failed - the database was not cleared. Please try again.${why}`);
     }
   };
 

@@ -31,7 +31,20 @@ export type PartPricingSources = {
 
 export type PricingSourceKey = "PO" | "PRICELIST" | "HISTORY" | "QP_ESTIMATE";
 
-export type PartPatch = {
+export type PartPatch = Partial<
+  Pick<
+    ExtractionPart,
+    | "totalSurfaceAreaSqIn"
+    | "coatingAreaSqIn"
+    | "maskingAreaSqIn"
+    | "bentFactor"
+    | "bentFactorOverride"
+    | "sowFlatAreaSqIn"
+    | "areaSource"
+    | "estimationMethod"
+    | "reasoningSummary"
+  >
+> & {
   priceSource?: PricingSourceKey | undefined;
   priceOverrideUnit?: number | undefined;
   priceRef?: string | undefined;
@@ -106,6 +119,7 @@ export function PricingModel({
   qpUnitPrice,
   poDocuments,
   onPatch,
+  headless = false,
 }: {
   part: ExtractionPart;
   sources?: PartPricingSources | undefined;
@@ -115,6 +129,8 @@ export function PricingModel({
   qpUnitPrice: number | null;
   poDocuments: PricingDocument[];
   onPatch: (patch: PartPatch) => void;
+  /** Keep applying the default price source, but draw nothing (the Price Model column shows it). */
+  headless?: boolean;
 }) {
   const qty = Number(part.quantity) > 0 ? Number(part.quantity) : 1;
   const poPrice = part.poLine?.unitPrice ?? null;
@@ -277,6 +293,8 @@ export function PricingModel({
   );
 
   const doc = poDocuments[0];
+
+  if (headless) return null;
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-2xs">

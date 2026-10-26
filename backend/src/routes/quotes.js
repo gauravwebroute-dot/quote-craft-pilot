@@ -305,9 +305,11 @@ router.post("/quotes/reset", async (req, res) => {
     return res.json({ success: true, ...result });
   } catch (error) {
     console.error("[POST /api/quotes/reset] failed:", error);
-    return res
-      .status(500)
-      .json({ error: "QUOTE_RESET_FAILED", message: "Could not reset quotes." });
+    return res.status(500).json({
+      error: "QUOTE_RESET_FAILED",
+      message: "Could not reset quotes.",
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 

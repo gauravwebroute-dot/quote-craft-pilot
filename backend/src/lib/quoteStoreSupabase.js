@@ -104,8 +104,18 @@ export function createQuoteStore({
   // next quote is QPyy-0001. Only touches this app's own database (never Odoo).
   async function resetAllQuotes() {
     const { count } = await sb.from("quotes").select("*", { count: "exact", head: true });
+    // Children first (works even when the foreign keys are not ON DELETE CASCADE).
+    must(await sb.from("quote_line_items").delete().gte("quote_id", 0), "resetAll:lineItems");
+    must(await sb.from("quote_revisions").delete().gte("quote_id", 0), "resetAll:revisions");
     must(await sb.from("quotes").delete().gte("id", 0), "resetAll:quotes");
     must(await sb.from("quote_counters").delete().neq("year", ""), "resetAll:counters");
+    // Row-level security can make a delete "succeed" while removing nothing - verify.
+    const { count: left } = await sb.from("quotes").select("*", { count: "exact", head: true });
+    if (left) {
+      throw new Error(
+        `[quoteStore:resetAll] ${left} quote(s) are still in the database after delete. The Supabase key probably lacks DELETE permission (row-level security) - use the service_role key or add a delete policy.`,
+      );
+    }
     return { deletedQuotes: count || 0, nextDraftSequenceId: await getCurrentDraftSequenceId() };
   }
 

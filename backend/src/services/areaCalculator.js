@@ -124,3 +124,36 @@ function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
+
+/** Default allowance for bends / flanges / jogs that a flat L x W envelope does not capture. */
+export const DEFAULT_BENT_FACTOR = (() => {
+  const n = Number(process.env.SOW_BENT_FACTOR);
+  return Number.isFinite(n) && n >= 1 && n <= 3 ? n : 1.05;
+})();
+
+/**
+ * Surface-area estimate for parts described only by a customer scope of work (no drawing).
+ * Sheet part: two faces + perimeter edge, then scaled by a bent-factor for formed flanges.
+ * area = (2 x L x W + 2 x (L + W) x t) x bentFactor
+ *
+ * @param {{lengthIn:number,widthIn:number,thicknessIn?:number|null}} dims  inches
+ * @param {number} [bentFactor]
+ */
+export function estimateSowArea(dims, bentFactor = DEFAULT_BENT_FACTOR) {
+  if (!hasPositive(dims?.lengthIn, dims?.widthIn)) return null;
+  const factor = Number.isFinite(bentFactor) && bentFactor >= 1 ? bentFactor : DEFAULT_BENT_FACTOR;
+  const t = hasPositive(dims.thicknessIn) ? dims.thicknessIn : 0;
+  const faces = 2 * dims.lengthIn * dims.widthIn;
+  const edges = 2 * (dims.lengthIn + dims.widthIn) * t;
+  const flat = faces + edges;
+  const area = round2(flat * factor);
+  return {
+    computed: true,
+    areaSqIn: area,
+    flatAreaSqIn: round2(flat),
+    bentFactor: factor,
+    confidence: "MEDIUM",
+    method: "SOW dimension estimate (2 faces + edges x bent-factor)",
+    reasoningSummary: `Estimated from scope-of-work size ${dims.lengthIn}" x ${dims.widthIn}"${t ? ` x ${t}" thick` : ""}: 2 faces + edges = ${round2(flat)} sq in, x bent-factor ${factor} = ${area} sq in. No drawing/flat pattern was provided - review and adjust if needed.`,
+  };
+}

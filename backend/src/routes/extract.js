@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { extractFromFiles } from "../services/extractionProvider.js";
-import { calculateSurfaceArea } from "../services/areaCalculator.js";
+import { calculateSurfaceArea, estimateSowArea, DEFAULT_BENT_FACTOR } from "../services/areaCalculator.js";
 import { analyzeStep, isStepFile } from "../services/cadStep.js";
 import { extractPurchaseOrder, isSpreadsheetFile, spreadsheetToText } from "../services/poExtraction.js";
 
@@ -46,6 +46,38 @@ function matchCad(cadResults, part, index, partCount) {
   return cadResults.length === 1 && partCount === 1 ? cadResults[0] : null;
 }
 
+// Copies what a scope-of-work line states (process, spec, colour, marking, size) onto a part, without
+// overwriting anything a real drawing already told us.
+function applySowSpec(part, line, po) {
+  const isSow = po.documentType === "SCOPE_OF_WORK";
+  const missing = (v) => v == null || v === "" || v === "NOT_SPECIFIED";
+  const bom = { ...(part.coatingBom ?? {}) };
+  const process = line.finishProcess;
+  if (process) {
+    if (missing(bom.process)) bom.process = process;
+    if (missing(bom.topcoat)) bom.topcoat = [process, line.finishSpec].filter(Boolean).join(" - ");
+    if (line.finishSpec && missing(bom.spec)) bom.spec = line.finishSpec;
+    part.coatingPresent = part.coatingPresent === false ? false : true;
+  }
+  const color = [line.finishColor, line.colorCode].filter(Boolean).join(" ");
+  if (color && missing(bom.color)) bom.color = color;
+  if (line.maskingRequired === false && missing(bom.masking)) bom.masking = "None (per scope of work)";
+  if (line.maskingRequired === true && missing(bom.masking)) bom.masking = "Required (per scope of work)";
+  if (isSow && missing(bom.coverage)) bom.coverage = "Coat all over unless stated otherwise";
+  part.coatingBom = bom;
+  if (line.material && missing(part.material)) part.material = line.material;
+  if (line.revision && (missing(part.revision) || part.revision === "0")) part.revision = line.revision;
+  if (line.partMarkRequired === true) {
+    part.partMark = true;
+    if (line.partMarkSpec && missing(part.partMarkSpec)) part.partMarkSpec = line.partMarkSpec;
+  }
+  if (line.packagingNote) part.packagingNote = line.packagingNote;
+  if (line.dimensionsIn) {
+    part.sowDimensions = line.dimensionsIn;
+  }
+  if (isSow) part.specSource = "SOW";
+}
+
 // Links PO lines to extracted drawing parts (by normalised part number) and creates drawing-less
 // parts for PO lines that have no drawing. Unit prices are kept only when the PO printed them.
 function mergePurchaseOrder(extraction, po) {
@@ -77,14 +109,17 @@ function mergePurchaseOrder(extraction, po) {
       const part = extraction.parts[idx];
       part.poLine = poLine;
       if (part.quantity == null && line.quantity != null) part.quantity = line.quantity;
+      applySowSpec(part, line, po);
       continue;
     }
-    extraction.parts.push({
+    const hasSize = Boolean(line.dimensionsIn);
+    const newPart = {
       partNumber: line.partNumber,
       partName: line.description,
       partSummary: line.description,
       revision: "0",
       quantity: line.quantity ?? 1,
+      quantityAssumed: line.quantity == null,
       material: "NOT_SPECIFIED",
       prepType: "NOT_SPECIFIED",
       existingCoating: "NOT_SPECIFIED",
@@ -95,9 +130,20 @@ function mergePurchaseOrder(extraction, po) {
       coatingBom: {},
       bomItems: null,
       sourceDrawingFile: null,
-      noDrawing: true,
+      noDrawing: !hasSize,
       poLine,
-    });
+    };
+    applySowSpec(newPart, line, po);
+    extraction.parts.push(newPart);
+  }
+  for (const w of po.warnings ?? []) extraction.extractionNotes.push(w);
+  if (po.documentType === "SCOPE_OF_WORK") {
+    extraction.extractionNotes.push(
+      `Scope of work read${po.documentTitle ? ` ("${po.documentTitle}")` : ""}: ${po.lines.length} part(s), finish process: ${po.finishProcess ?? "not stated"}.`,
+    );
+    for (const item of po.openItems ?? []) extraction.extractionNotes.push(`Open item from customer: ${item}`);
+    if (po.certificateRequired) extraction.extractionNotes.push("Customer requires a certificate of conformance with each shipment.");
+    if (po.firstArticleRequired) extraction.extractionNotes.push("Customer recommends / requires first-article approval before the balance is run.");
   }
   extraction.extractionNotes.push(
     po.hasPricing
@@ -122,6 +168,8 @@ router.post(
     const poUploads = req.files?.poFiles ?? [];
     const emailText = typeof req.body?.emailText === "string" ? req.body.emailText.trim() : "";
     const model = typeof req.body?.model === "string" ? req.body.model.trim() : undefined;
+    const bentRaw = Number(req.body?.bentFactor);
+    const globalBentFactor = Number.isFinite(bentRaw) && bentRaw >= 1 && bentRaw <= 3 ? bentRaw : DEFAULT_BENT_FACTOR;
 
     if (uploadedFiles.length === 0 && poUploads.length === 0 && !emailText) {
       return res.status(400).json({
@@ -189,13 +237,19 @@ router.post(
       extraction.parts = extraction.parts.map((part, partIndex) => {
         const cad = matchCad(cadResults, part, partIndex, extraction.parts.length);
         // 1. Mandatory Surface Area Calculation & Tier Resolution
-        const areaResult = part.noDrawing
+        const sowEstimate =
+          !cad && part.specSource === "SOW" && !part.sourceDrawingFile && !part.dimensions && part.sowDimensions
+            ? estimateSowArea(part.sowDimensions, Number(part.bentFactor) >= 1 ? Number(part.bentFactor) : globalBentFactor)
+            : null;
+        const areaResult = sowEstimate
+          ? sowEstimate
+          : part.noDrawing
           ? {
               areaSqIn: 0,
               confidence: "LOW",
               method: "No drawing provided",
               reasoningSummary:
-                "Created from a purchase order line; no drawing was uploaded, so QuotePilot cannot estimate surface area.",
+                "Created from a purchase order line with no dimensions and no drawing, so QuotePilot cannot estimate surface area. Upload a drawing or enter the area manually.",
             }
           : cad
           ? {
@@ -207,8 +261,8 @@ router.post(
           : calculateSurfaceArea(part.dimensions, part.totalSurfaceAreaSqIn);
         const resolvedArea = areaResult.areaSqIn;
         const resolvedConfidence = areaResult.confidence;
-        const resolvedMethod = cad ? areaResult.method : part.estimationMethod || areaResult.method;
-        const resolvedReasoning = cad
+        const resolvedMethod = cad || sowEstimate ? areaResult.method : part.estimationMethod || areaResult.method;
+        const resolvedReasoning = cad || sowEstimate
           ? areaResult.reasoningSummary
           : part.reasoningSummary || areaResult.reasoningSummary;
 
@@ -308,6 +362,13 @@ router.post(
           totalSurfaceAreaSqIn: totalSurfaceArea,
           coatingAreaSqIn,
           maskingAreaSqIn,
+          areaSource: cad ? "cad" : sowEstimate ? "sow_estimate" : part.noDrawing ? "none" : "drawing",
+          ...(sowEstimate
+            ? { bentFactor: sowEstimate.bentFactor, sowFlatAreaSqIn: sowEstimate.flatAreaSqIn }
+            : {}),
+          ...(part.noDrawing
+            ? { areaUnknownReason: "No drawing and no dimensions were found in the uploaded document, so the surface area cannot be calculated." }
+            : {}),
           areaConfidence: resolvedConfidence,
           estimationMethod: resolvedMethod,
           reasoningSummary: resolvedReasoning,

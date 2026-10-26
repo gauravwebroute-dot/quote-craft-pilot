@@ -77,8 +77,11 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const materialOz = Math.round(totalArea * materialOzPerSqIn * 1000) / 1000;
 
   const rawColor = part.coatingBom?.color || part.coatingBom?.topcoat || "";
+  // Name the real process (e.g. "Powder Coat") instead of always saying Cerakote.
+  const processText = String(part.coatingBom?.process || part.coatingBom?.topcoat || "");
+  const isPowder = /powder/i.test(processText);
   const colorComplexity = rawColor
-    ? `Cerakote ${rawColor}`
+    ? `${isPowder ? "Powder Coat" : "Cerakote"} ${rawColor}`.replace(/^(Powder Coat|Cerakote) \1/i, "$1")
     : (rc.coating?.defaultColorComplexity || "TBD – Cerakote Camo Green FED-STD-595");
   const ovenTime = rc.coating?.defaultOvenTime || "TBD";
 
