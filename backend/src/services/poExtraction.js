@@ -42,6 +42,8 @@ Scope-of-work details (fill whenever the document states them, per line, applyin
 - maskingRequired: true / false, or null if the document is silent. "Masking: none" means false.
 - partMarkRequired: true when marking/identification is required for that line; partMarkSpec: the marking method, content and minimum height as written.
 - packagingNote: cleanliness / packaging requirement that applies to that line.
+- existingCoating: the coating/finish ALREADY on the part when it arrives, only if the document states or clearly implies it (e.g. parts arrive bare / raw / unfinished and only the finish operation is ours -> "None - bare <substrate>"; or an existing plating/paint is named). Use null when the document says nothing about the incoming surface.
+- prepNote: surface preparation the document requires or leaves to the vendor, as written; coverageNote: where the finish must or must not be applied (masking areas, "all over", exempt surfaces) as written. null when not stated.
 - revision: drawing/part revision for that line when printed.
 Document-level fields: documentTitle, topAssembly, declaredPartCount (the number of parts the document says are in scope, if stated), substrate, finishProcess (document-wide), certificateRequired (certificate of conformance needed), firstArticleRequired, openItems (array of short strings: unresolved questions the document tells the vendor to confirm), specialNotes.
 Always call the record_purchase_order tool.`;
@@ -69,6 +71,9 @@ const PO_TOOL = {
         firstArticleRequired: { type: ["boolean", "null"] },
         openItems: { type: ["array", "null"], items: { type: "string" } },
         specialNotes: { type: ["string", "null"] },
+        existingCoating: { type: ["string", "null"] },
+        prepNote: { type: ["string", "null"] },
+        coverageNote: { type: ["string", "null"] },
         lines: {
           type: "array",
           items: {
@@ -95,6 +100,9 @@ const PO_TOOL = {
               partMarkRequired: { type: ["boolean", "null"] },
               partMarkSpec: { type: ["string", "null"] },
               packagingNote: { type: ["string", "null"] },
+              existingCoating: { type: ["string", "null"] },
+              prepNote: { type: ["string", "null"] },
+              coverageNote: { type: ["string", "null"] },
             },
             required: ["partNumber", "description", "quantity", "unitPrice"],
           },
@@ -144,6 +152,9 @@ export function sowDimensionsInInches(l) {
 /** Normalises whatever the model returned so the rest of the app can trust the shape. */
 export function normalizePurchaseOrder(raw, fileNames = []) {
   const docFinish = cleanStr(raw?.finishProcess);
+  const docExisting = cleanStr(raw?.existingCoating);
+  const docPrep = cleanStr(raw?.prepNote);
+  const docCoverage = cleanStr(raw?.coverageNote);
   const lines = (Array.isArray(raw?.lines) ? raw.lines : [])
     .map((l, i) => {
       const unitPrice = toNumberOrNull(l?.unitPrice);
@@ -164,6 +175,9 @@ export function normalizePurchaseOrder(raw, fileNames = []) {
         partMarkRequired: toBoolOrNull(l?.partMarkRequired),
         partMarkSpec: cleanStr(l?.partMarkSpec),
         packagingNote: cleanStr(l?.packagingNote),
+        existingCoating: cleanStr(l?.existingCoating) ?? docExisting,
+        prepNote: cleanStr(l?.prepNote) ?? docPrep,
+        coverageNote: cleanStr(l?.coverageNote) ?? docCoverage,
       };
     })
     .filter((l) => l.partNumber || l.description);

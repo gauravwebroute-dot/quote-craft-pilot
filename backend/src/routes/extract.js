@@ -63,9 +63,12 @@ function applySowSpec(part, line, po) {
   if (color && missing(bom.color)) bom.color = color;
   if (line.maskingRequired === false && missing(bom.masking)) bom.masking = "None (per scope of work)";
   if (line.maskingRequired === true && missing(bom.masking)) bom.masking = "Required (per scope of work)";
-  if (isSow && missing(bom.coverage)) bom.coverage = "Coat all over unless stated otherwise";
+  if (line.coverageNote && missing(bom.coverage)) bom.coverage = line.coverageNote;
+  if (line.prepNote && missing(bom.prep)) bom.prep = line.prepNote;
   part.coatingBom = bom;
   if (line.material && missing(part.material)) part.material = line.material;
+  if (line.existingCoating && missing(part.existingCoating)) part.existingCoating = line.existingCoating;
+  if (line.prepNote && missing(part.prepType)) part.prepType = line.prepNote;
   if (line.revision && (missing(part.revision) || part.revision === "0")) part.revision = line.revision;
   if (line.partMarkRequired === true) {
     part.partMark = true;
@@ -147,8 +150,8 @@ function mergePurchaseOrder(extraction, po) {
   }
   extraction.extractionNotes.push(
     po.hasPricing
-      ? `Purchase order ${po.poNumber ?? ""} read: ${po.lines.length} line(s), unit prices listed.`
-      : `Purchase order ${po.poNumber ?? ""} read: ${po.lines.length} line(s), no unit pricing provided.`,
+      ? `${po.documentType === "SCOPE_OF_WORK" ? "Scope of work" : `Purchase order ${po.poNumber ?? ""}`.trim()} read: ${po.lines.length} line(s), unit prices listed.`
+      : `${po.documentType === "SCOPE_OF_WORK" ? "Scope of work" : `Purchase order ${po.poNumber ?? ""}`.trim()} read: ${po.lines.length} line(s), no unit pricing provided.`,
   );
 }
 

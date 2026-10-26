@@ -113,6 +113,7 @@ export type PricingPartBreakdown = {
     overheadProfit: { cost: number; pct: number; text: string };
   };
   summary?: {
+    processLabel?: string;
     cerakoteWithoutMasking: string;
     cerakoteWithMasking: string;
     mediaBlasting: string;
@@ -171,7 +172,7 @@ function PricingGroupCard({
   rows: Array<{
     label: string;
     value: string;
-    parenthetical?: string;
+    parenthetical?: string | undefined;
   }>;
 }) {
   return (
@@ -642,15 +643,15 @@ function PartDetailCard({
                       },
                       {
                         label: "Cost",
-                        value: masking ? `$${masking.cost.toFixed(2)} (unit)` : "$0.00 (unit)",
-                        parenthetical: masking?.rateText || "+$0.06 per SI of total area",
+                        value: masking ? `$${masking.cost.toFixed(2)} (unit)` : "—",
+                        parenthetical: masking?.rateText,
                       },
                     ]}
                   />
 
                   <PricingGroupCard
                     title="Media Blasting"
-                    costBadge={mediaBlasting?.costText || "Included ($0.00/SI)"}
+                    costBadge={mediaBlasting?.costText}
                     rows={[
                       { label: "Total Area", value: `${mediaBlasting?.totalArea ?? totalArea} SI` },
                       {
@@ -663,34 +664,34 @@ function PartDetailCard({
                   />
                 </div>
 
-                {/* 3. Cerakote Coating Process & 4. Adjustments */}
+                {/* 3. Coating process & 4. Adjustments */}
                 <div className="grid gap-4 md:grid-cols-2">
                   <PricingGroupCard
-                    title={coating?.processName || "Cerakote Coating Process"}
+                    title={coating?.processName || "Coating Process"}
                     costBadge={coating ? formatMoney(coating.cost) : undefined}
                     rows={[
                       { label: "Total Area", value: `${coating?.totalArea ?? totalArea} SI` },
                       {
                         label: "Time",
-                        value: coating?.timeText || `${(totalArea * 0.03).toFixed(2)} min/unit`,
-                        parenthetical: coating?.timeRateText || "0.03 min/SI",
+                        value: coating?.timeText || "—",
+                        parenthetical: coating?.timeRateText,
                       },
                       {
                         label: "Cost",
-                        value: coating?.costText || `$${(totalArea * 0.4).toFixed(2)}/unit`,
-                        parenthetical: coating?.costRateText || "$0.40/SI",
+                        value: coating?.costText || "—",
+                        parenthetical: coating?.costRateText,
                       },
                       {
                         label: "Material",
-                        value: coating?.materialText || `${(totalArea * 0.0035).toFixed(3)} oz`,
-                        parenthetical: coating?.materialRateText || "0.0035 oz/SI",
+                        value: coating?.materialText || "—",
+                        parenthetical: coating?.materialRateText,
                       },
                       {
                         label: "Color Complexity",
                         value:
                           coating?.colorComplexity ||
                           part.coatingBom?.color ||
-                          "TBD – Cerakote Camo Green FED-STD-595",
+                          "TBD",
                       },
                       {
                         label: "Oven Time",
@@ -705,34 +706,32 @@ function PartDetailCard({
                       {
                         label: "Chem Film",
                         value:
-                          adjustments?.chemFilm?.text ||
-                          "YES – 1 Lot of $200 to add to invoice ($200 min lot fee, $0.03/SI)",
+                          adjustments?.chemFilm?.text || "—",
                       },
                       {
                         label: "Rush order",
-                        value: adjustments?.rushOrder?.text || "+$0.00 (0.0%)",
+                        value: adjustments?.rushOrder?.text || "—",
                       },
                       {
                         label: "Setup / Extra work",
-                        value: adjustments?.setupExtraWork?.text || "+$0.00 (0.0%)",
+                        value: adjustments?.setupExtraWork?.text || "—",
                       },
                       {
                         label: "Shipping",
-                        value: adjustments?.shipping?.text || "+$0.00 (0%)",
+                        value: adjustments?.shipping?.text || "—",
                       },
                       {
                         label: "Discount",
-                        value: adjustments?.discount?.text || "-$0.00 (0%)",
+                        value: adjustments?.discount?.text || "—",
                       },
                       {
                         label: "Overhead & Profit",
-                        value: adjustments?.overheadProfit?.text || "+$0.00 (0%)",
+                        value: adjustments?.overheadProfit?.text || "—",
                       },
                       {
                         label: "Price per Unit",
                         value:
-                          summary?.pricePerUnitMinText ||
-                          `$${unitPrice.toFixed(2)} ($5.00/unit min)`,
+                          summary?.pricePerUnitMinText || formatMoney(unitPrice),
                       },
                     ]}
                   />
@@ -749,24 +748,24 @@ function PartDetailCard({
                     <div className="space-y-1.5">
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">
-                          Cerakote without masking:
+                          {summary?.processLabel || "Coating"} without masking:
                         </span>
                         <span className="font-medium tabular-nums">
-                          {summary?.cerakoteWithoutMasking || "$0.40/SI"}
+                          {summary?.cerakoteWithoutMasking || "—"}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">
-                          Cerakote with masking:
+                          {summary?.processLabel || "Coating"} with masking:
                         </span>
                         <span className="font-medium tabular-nums">
-                          {summary?.cerakoteWithMasking || "$0.46/SI"}
+                          {summary?.cerakoteWithMasking || "—"}
                         </span>
                       </div>
                       <div className="flex justify-between py-1">
                         <span className="font-semibold text-foreground">Media Blasting:</span>
                         <span className="font-medium tabular-nums">
-                          {summary?.mediaBlasting || "Included ($0.00/SI)"}
+                          {summary?.mediaBlasting || "—"}
                         </span>
                       </div>
                     </div>
@@ -774,13 +773,13 @@ function PartDetailCard({
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">Chem Film:</span>
                         <span className="font-medium tabular-nums">
-                          {summary?.chemFilm || "$0.03/SI (with $200 min lot fee)"}
+                          {summary?.chemFilm || "—"}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">Minimum price/unit:</span>
                         <span className="font-medium tabular-nums">
-                          {summary?.minimumPricePerUnit || "$5.00"}
+                          {summary?.minimumPricePerUnit || "—"}
                         </span>
                       </div>
                     </div>
@@ -795,7 +794,11 @@ function PartDetailCard({
                       <span className="text-3xl font-black tabular-nums">
                         {formatMoney(unitPrice)}
                       </span>
-                      <span className="text-xs opacity-80">($5.00 minimum price per unit)</span>
+                      {summary?.minimumPricePerUnit ? (
+                        <span className="text-xs opacity-80">
+                          ({summary.minimumPricePerUnit} minimum price per unit)
+                        </span>
+                      ) : null}
                     </div>
                     <div className="text-right">
                       <span className="text-sm opacity-90 font-medium">
@@ -1171,9 +1174,7 @@ export function SectionExtraction({
       maskingSqIn > 0 ||
       Boolean(part.dimensions?.holes && part.dimensions.holes.length > 0);
 
-    const workType = part.coatingBom?.topcoat?.toLowerCase().includes("cerakote")
-      ? "Cerakote"
-      : part.coatingBom?.topcoat || "Coating";
+    const workType = part.coatingBom?.process || part.coatingBom?.topcoat || "Coating";
 
     const displayArea = coatingSqIn > 0 ? coatingSqIn : totalArea;
 
