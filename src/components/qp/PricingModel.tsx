@@ -3,6 +3,13 @@ import { AlertTriangle, ExternalLink, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ExtractionPart, PurchaseOrderData } from "./SectionInput";
 
 export type HistoryRecord = {
@@ -119,7 +126,7 @@ export function PricingModel({
   qpUnitPrice,
   poDocuments,
   onPatch,
-  headless = false,
+  variant = "card",
 }: {
   part: ExtractionPart;
   sources?: PartPricingSources | undefined;
@@ -129,8 +136,8 @@ export function PricingModel({
   qpUnitPrice: number | null;
   poDocuments: PricingDocument[];
   onPatch: (patch: PartPatch) => void;
-  /** Keep applying the default price source, but draw nothing (the Price Model column shows it). */
-  headless?: boolean;
+  /** "cell" renders only a compact source dropdown (for the Part Summary table); "card" is the full panel. */
+  variant?: "card" | "cell";
 }) {
   const qty = Number(part.quantity) > 0 ? Number(part.quantity) : 1;
   const poPrice = part.poLine?.unitPrice ?? null;
@@ -294,7 +301,41 @@ export function PricingModel({
 
   const doc = poDocuments[0];
 
-  if (headless) return null;
+  if (variant === "cell") {
+    // Compact selector for the Part Summary table. Unavailable sources stay visible but disabled,
+    // with the reason, so the estimator can see why they cannot be picked.
+    const current = options.find((o) => o.key === effective);
+    return (
+      // Stop clicks (including ones from the portalled list) from opening the part row.
+      <div onClick={(e) => e.stopPropagation()}>
+        <Select
+          value={effective}
+          onValueChange={(v) => {
+            const o = options.find((x) => x.key === v);
+            if (o) choose(o.key, o.available, o.viewable);
+          }}
+        >
+          <SelectTrigger
+            aria-label={`Price model for ${part.partNumber ?? "part"}`}
+            title={current ? `${current.label}: ${current.note}` : undefined}
+            className="h-8 w-full gap-1 px-2 text-xs"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((o) => (
+              <SelectItem key={o.key} value={o.key} disabled={!o.available}>
+                {o.available ? o.label : `${o.label} – ${o.note}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {loading ? (
+          <span className="mt-0.5 block text-[10px] text-muted-foreground">Checking Odoo…</span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-2xs">
