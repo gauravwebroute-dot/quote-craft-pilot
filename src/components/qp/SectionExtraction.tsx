@@ -1219,14 +1219,6 @@ export function SectionExtraction({
           ? part.areaUnknownReason ||
             "Surface area could not be determined: no drawing and no dimensions were found in the uploaded documents."
           : part.reasoningSummary || "",
-      priceModel:
-        part.priceSource === "PO"
-          ? "Purchase Order"
-          : part.priceSource === "PRICELIST"
-            ? "Odoo Price List"
-            : part.priceSource === "HISTORY" || part.priceSource === "LAST_QUOTED"
-              ? "Pricing History"
-              : "QP Estimate",
       pricePerUnit: priced?.priced ? formatMoney(priced.pricePerUnit ?? 0) : "Pending",
       qty: part.quantity != null ? String(part.quantity) : "1",
       total: priced?.priced ? formatMoney(priced.totalLineItem ?? 0) : "Pending",
@@ -1479,11 +1471,11 @@ export function SectionExtraction({
                     <colgroup>
                       <col className="w-[3%]" />
                       <col className="w-[11%]" />
-                      <col className="w-[24%]" />
+                      <col className="w-[19%]" />
                       <col className="w-[7%]" />
                       <col className="w-[10%]" />
                       <col className="w-[11%]" />
-                      <col className="w-[9%]" />
+                      <col className="w-[14%]" />
                       <col className="w-[9%]" />
                       <col className="w-[6%]" />
                       <col className="w-[10%]" />
@@ -1555,8 +1547,18 @@ export function SectionExtraction({
                                 {row.workType}
                               </span>
                             </td>
-                            <td className="border-r border-slate-200 px-2 py-3.5 text-muted-foreground">
-                              {row.priceModel}
+                            <td className="border-r border-slate-200 px-1.5 py-2.5">
+                              <PricingModel
+                                variant="cell"
+                                part={parts[idx]!}
+                                sources={sources[idx]}
+                                loading={sourcesLoading}
+                                hasPurchaseOrder={Boolean(extraction?.purchaseOrder)}
+                                purchaseOrder={extraction?.purchaseOrder}
+                                qpUnitPrice={pricing?.results[idx]?.estimatedPricePerUnit ?? null}
+                                poDocuments={poDocuments}
+                                onPatch={(patch) => onPatchPart?.(idx, patch)}
+                              />
                             </td>
                             <td className="border-r border-slate-200 px-2 py-3.5 text-right font-semibold tabular-nums">
                               {row.pricePerUnit}
@@ -1615,25 +1617,6 @@ export function SectionExtraction({
             </Card>
           )}
 
-          {(focusedSection === "overview" || focusedSection === "summary" || !focusedSection) &&
-          parts.length > 0 ? (
-            <div className="space-y-4">
-              {parts.map((part, index) => (
-                <PricingModel
-                  headless
-                  key={`${part.partNumber ?? "part"}-${index}`}
-                  part={part}
-                  sources={sources[index]}
-                  loading={sourcesLoading}
-                  hasPurchaseOrder={Boolean(extraction?.purchaseOrder)}
-                  purchaseOrder={extraction?.purchaseOrder}
-                  qpUnitPrice={pricing?.results[index]?.estimatedPricePerUnit ?? null}
-                  poDocuments={poDocuments}
-                  onPatch={(patch) => onPatchPart?.(index, patch)}
-                />
-              ))}
-            </div>
-          ) : null}
         </>
       )}
 
