@@ -77,7 +77,7 @@ export function mapQuotePilotToOdooCsv(
     const rates = (priced as { rates?: { coatingPerSi?: number; maskingPerSi?: number } }).rates;
     const pricePerSi =
       typeof rates?.coatingPerSi === "number"
-        ? Math.round((rates.coatingPerSi + (isMaskingNeeded ? (rates.maskingPerSi ?? 0) : 0)) * 100) / 100
+        ? Math.round((rates.coatingPerSi + (isMaskingNeeded ? (rates.maskingPerSi ?? 0) : 0)) * 10000) / 10000
         : "";
 
     const baseName = part.partName || part.partSummary || part.partNumber || "Coating Line Item";

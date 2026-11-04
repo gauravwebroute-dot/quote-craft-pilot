@@ -26,6 +26,16 @@ export const DEFAULT_RATE_CARD = {
     ovenMinutesFlat: 0,
     defaultColorComplexity: "TBD – Cerakote Camo Green FED-STD-595",
     defaultOvenTime: "TBD",
+    // Process-specific coating rates. A rule applies when its `match` (case-insensitive regex) is found in
+    // the part's process / topcoat text taken from the customer's document. Anything that matches no rule
+    // is priced exactly like Cerakote (ratePerSqIn above). Give the rate per square foot OR per square inch.
+    processRates: [
+      {
+        label: "Powder Coat",
+        match: "powder",
+        ratePerSqFt: Number(process.env.RATE_POWDER_PER_SQFT) || 10.0, // $10.00 per SF (client, Nov 2026)
+      },
+    ],
   },
 
   chemFilm: {
