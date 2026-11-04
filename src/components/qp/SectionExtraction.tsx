@@ -484,7 +484,7 @@ function PartDetailCard({
                   {part.sowDimensions ? (
                     <div className="space-y-1">
                       <Label className="text-xs">
-                        Bent-factor (this part) · global {globalBentFactor}
+                        Optional flange allowance, this part (1.00 = none) · all parts: {globalBentFactor}
                       </Label>
                       <div className="flex items-center gap-2">
                         <Input
@@ -1123,7 +1123,7 @@ export function SectionExtraction({
     }
   };
 
-  // Scope-of-work parts whose area is an estimate (bent-factor applies to these).
+  // Scope-of-work parts whose area is an estimate (the optional flange allowance applies to these).
   const sowParts = parts_forSow(extraction?.parts ?? []);
   const [globalBentFactor, setGlobalBentFactor] = useState<number>(DEFAULT_BENT_FACTOR);
   const [globalBentInput, setGlobalBentInput] = useState<string>(String(DEFAULT_BENT_FACTOR));
@@ -1451,7 +1451,7 @@ export function SectionExtraction({
                   </span>
                   <span className="flex items-center gap-2">
                     <Label htmlFor="global-bent" className="text-xs">
-                      Bent-factor (all parts)
+                      Optional flange allowance, all parts (1.00 = none)
                     </Label>
                     <Input
                       id="global-bent"

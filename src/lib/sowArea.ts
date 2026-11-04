@@ -1,8 +1,9 @@
 // Surface-area helpers for parts described only by a customer scope of work (no drawing).
 // Mirrors backend/src/services/areaCalculator.js#estimateSowArea so the estimator can adjust the
-// bent-factor in the browser and see pricing update without re-running extraction.
+// flange allowance in the browser and see pricing update without re-running extraction.
 
-export const DEFAULT_BENT_FACTOR = 1.05;
+/** 1.00 = no allowance (plain 2 faces + edges). An allowance is only ever applied by explicit choice. */
+export const DEFAULT_BENT_FACTOR = 1;
 
 export type SowDimensions = {
   lengthIn: number;
@@ -22,7 +23,7 @@ export function clampBentFactor(raw: number): number {
   return Number.isFinite(raw) ? Math.min(3, Math.max(1, raw)) : DEFAULT_BENT_FACTOR;
 }
 
-/** Fields to patch onto a part when its bent-factor changes. */
+/** Fields to patch onto a part when its flange allowance changes. */
 export function bentFactorPatch(
   dims: SowDimensions,
   factor: number,
@@ -39,8 +40,11 @@ export function bentFactorPatch(
     bentFactorOverride: opts.override,
     sowFlatAreaSqIn: flat,
     areaSource: "sow_estimate" as const,
-    estimationMethod: "SOW dimension estimate (2 faces + edges x bent-factor)",
-    reasoningSummary: `Estimated from scope-of-work size ${dims.lengthIn}" x ${dims.widthIn}"${dims.thicknessIn ? ` x ${dims.thicknessIn}" thick` : ""}: 2 faces + edges = ${flat} sq in, x bent-factor ${f} = ${total} sq in. No drawing/flat pattern was provided - review and adjust if needed.`,
+    estimationMethod:
+      f === 1
+        ? "SOW dimension estimate (2 faces + edges)"
+        : `SOW dimension estimate (2 faces + edges x flange allowance ${f})`,
+    reasoningSummary: `Estimated from scope-of-work size ${dims.lengthIn}" x ${dims.widthIn}"${dims.thicknessIn ? ` x ${dims.thicknessIn}" thick` : ""}: 2 faces + edges = ${flat} sq in${f === 1 ? "" : `, x flange allowance ${f} = ${total} sq in`}. No drawing/flat pattern was provided, so this is an estimate from the stated envelope size - review and adjust if needed.`,
   };
 }
 

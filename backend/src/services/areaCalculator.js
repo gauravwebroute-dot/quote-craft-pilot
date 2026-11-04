@@ -125,15 +125,19 @@ function round2(n) {
 }
 
 
-/** Default allowance for bends / flanges / jogs that a flat L x W envelope does not capture. */
+/**
+ * Optional multiplier for bends / flanges / jogs that a flat L x W envelope does not capture.
+ * 1.00 = no allowance (plain 2 faces + edges). Only an explicit choice (SOW_BENT_FACTOR env, or the
+ * estimator in the UI) raises it - it is never added silently.
+ */
 export const DEFAULT_BENT_FACTOR = (() => {
   const n = Number(process.env.SOW_BENT_FACTOR);
-  return Number.isFinite(n) && n >= 1 && n <= 3 ? n : 1.05;
+  return Number.isFinite(n) && n >= 1 && n <= 3 ? n : 1;
 })();
 
 /**
  * Surface-area estimate for parts described only by a customer scope of work (no drawing).
- * Sheet part: two faces + perimeter edge, then scaled by a bent-factor for formed flanges.
+ * Sheet part: two faces + perimeter edge, optionally scaled by a flange allowance (default 1.00 = none).
  * area = (2 x L x W + 2 x (L + W) x t) x bentFactor
  *
  * @param {{lengthIn:number,widthIn:number,thicknessIn?:number|null}} dims  inches
@@ -153,7 +157,7 @@ export function estimateSowArea(dims, bentFactor = DEFAULT_BENT_FACTOR) {
     flatAreaSqIn: round2(flat),
     bentFactor: factor,
     confidence: "MEDIUM",
-    method: "SOW dimension estimate (2 faces + edges x bent-factor)",
-    reasoningSummary: `Estimated from scope-of-work size ${dims.lengthIn}" x ${dims.widthIn}"${t ? ` x ${t}" thick` : ""}: 2 faces + edges = ${round2(flat)} sq in, x bent-factor ${factor} = ${area} sq in. No drawing/flat pattern was provided - review and adjust if needed.`,
+    method: factor === 1 ? "SOW dimension estimate (2 faces + edges)" : `SOW dimension estimate (2 faces + edges x flange allowance ${factor})`,
+    reasoningSummary: `Estimated from scope-of-work size ${dims.lengthIn}" x ${dims.widthIn}"${t ? ` x ${t}" thick` : ""}: 2 faces + edges = ${round2(flat)} sq in${factor === 1 ? "" : `, x flange allowance ${factor} = ${area} sq in`}. No drawing/flat pattern was provided, so this is an estimate from the stated envelope size - review and adjust if needed.`,
   };
 }
