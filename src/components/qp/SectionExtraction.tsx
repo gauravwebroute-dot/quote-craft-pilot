@@ -438,7 +438,9 @@ function PartDetailCard({
                   editable={false}
                   value={
                     <span className="flex items-center gap-2">
-                      <span className="font-semibold">{totalArea} sq in</span>
+                      <span className="font-semibold">
+                        {totalArea} sq in ({(totalArea / 144).toFixed(2)} sq ft)
+                      </span>
                       {renderConfidenceBadge(part.areaConfidence)}
                     </span>
                   }
@@ -673,7 +675,10 @@ function PartDetailCard({
                     title={coating?.processName || "Coating Process"}
                     costBadge={coating ? formatMoney(coating.cost) : undefined}
                     rows={[
-                      { label: "Total Area", value: `${coating?.totalArea ?? totalArea} SI` },
+                      {
+                        label: "Total Area",
+                        value: `${coating?.totalArea ?? totalArea} SI (${((coating?.totalArea ?? totalArea) / 144).toFixed(2)} SF)`,
+                      },
                       {
                         label: "Time",
                         value: coating?.timeText || "—",
@@ -1206,7 +1211,8 @@ export function SectionExtraction({
         displayArea === 0
           ? "Unknown"
           : `${part.areaSource === "sow_estimate" ? "≈ " : ""}${displayArea} sq in`,
-      areaTag:
+      areaTag: [
+        displayArea > 0 ? `${(displayArea / 144).toFixed(1)} SF` : "",
         part.areaSource === "sow_estimate"
           ? "est. from SOW size"
           : part.areaSource === "manual"
@@ -1214,6 +1220,9 @@ export function SectionExtraction({
             : displayArea === 0
               ? "no size / drawing"
               : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
       areaTitle:
         displayArea === 0
           ? part.areaUnknownReason ||

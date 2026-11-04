@@ -71,7 +71,27 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   // --- 3. Cerakote Coating Process ---
   const coatMinPerSqIn = rc.coating?.minPerSqIn ?? 0.03;
   const coatTime = round2(totalArea * coatMinPerSqIn);
-  const coatRate = rc.coating?.ratePerSqIn ?? 0.40;
+  // Rate per SQUARE INCH used in the maths. A process-specific rule (e.g. powder coat priced per square
+  // foot) overrides the default shop rate; no matching rule = priced like Cerakote.
+  const processText = `${part.coatingBom?.process ?? ""} ${part.coatingBom?.topcoat ?? ""}`;
+  const rateRule = (rc.coating?.processRates ?? []).find((r) => {
+    try {
+      return r?.match && new RegExp(r.match, "i").test(processText);
+    } catch {
+      return false;
+    }
+  });
+  const ruleSqFt = Number(rateRule?.ratePerSqFt);
+  const ruleSqIn = Number(rateRule?.ratePerSqIn);
+  const usesSqFt = Number.isFinite(ruleSqFt) && ruleSqFt > 0;
+  const coatRate = usesSqFt
+    ? ruleSqFt / SQ_IN_PER_SQ_FT
+    : Number.isFinite(ruleSqIn) && ruleSqIn > 0
+      ? ruleSqIn
+      : (rc.coating?.ratePerSqIn ?? 0.40);
+  // Show the rate in the unit it was agreed in ($/SF for rules given per SF, otherwise $/SI).
+  const fmtRate = (perSqIn) =>
+    usesSqFt ? `$${(perSqIn * SQ_IN_PER_SQ_FT).toFixed(2)}/SF` : `$${perSqIn.toFixed(2)}/SI`;
   const coatCost = round2(totalArea * coatRate);
   const materialOzPerSqIn = rc.coating?.materialOzPerSqIn ?? 0.0035;
   const materialOz = Math.round(totalArea * materialOzPerSqIn * 1000) / 1000;
@@ -96,7 +116,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     timeRateText: `${coatMinPerSqIn} min/SI`,
     cost: coatCost,
     costText: `$${coatCost.toFixed(2)}/unit`,
-    costRateText: `$${coatRate.toFixed(2)}/SI`,
+    costRateText: fmtRate(coatRate),
     materialOz,
     materialText: `${materialOz} oz`,
     materialRateText: `${materialOzPerSqIn} oz/SI`,
@@ -205,8 +225,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   // --- Pricing Summary for UI ---
   const summary = {
     processLabel,
-    cerakoteWithoutMasking: `$${coatRate.toFixed(2)}/SI`,
-    cerakoteWithMasking: `$${(coatRate + maskingRate).toFixed(2)}/SI`,
+    cerakoteWithoutMasking: fmtRate(coatRate),
+    cerakoteWithMasking: fmtRate(coatRate + maskingRate),
     mediaBlasting: "Included ($0.00/SI)",
     chemFilm: `$${chemFilmRate.toFixed(2)}/SI (with $${chemFilmMinFee} min lot fee)`,
     minimumPricePerUnit: `$${minPrice.toFixed(2)}`,
@@ -243,6 +263,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     },
   };
 }
+
+const SQ_IN_PER_SQ_FT = 144;
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
