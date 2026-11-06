@@ -146,8 +146,9 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const chemFilmRequested = Boolean(overrides.chemFilm || adj.chemFilm);
   const chemFilmRate = rc.chemFilm?.ratePerSqIn ?? 0.03;
   const chemFilmMinFee = rc.chemFilm?.minimumLotFee ?? 200;
+  // Extended chem film price for this part. The $200 minimum is a quote-level lot fee (see routes/price.js).
   const chemFilmCalculated = round2(totalArea * quantity * chemFilmRate);
-  const chemFilmCharge = chemFilmRequested ? Math.max(chemFilmMinFee, chemFilmCalculated) : 0;
+  const chemFilmCharge = chemFilmRequested ? chemFilmCalculated : 0;
 
   // Marking / special packaging required by the customer's document (rates configurable, default 0).
   const markRate = Number(rc.extras?.partMarkingPerPart) || 0;
@@ -182,8 +183,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
       lotFee: chemFilmMinFee,
       ratePerSqIn: chemFilmRate,
       text: chemFilmRequested
-        ? `YES – 1 Lot of $${chemFilmCharge.toFixed(2)} to add to invoice ($${chemFilmMinFee} min lot fee, $${chemFilmRate.toFixed(2)}/SI)`
-        : `NO ($${chemFilmMinFee} min lot fee, $${chemFilmRate.toFixed(2)}/SI)`,
+        ? `YES – $${chemFilmCharge.toFixed(2)} ($${chemFilmRate.toFixed(2)}/SI; $${chemFilmMinFee} minimum applied once per quote)`
+        : `NO ($${chemFilmRate.toFixed(2)}/SI; $${chemFilmMinFee} minimum applied once per quote)`,
     },
     rushOrder: {
       cost: rushOrderCost,
@@ -213,8 +214,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   };
 
   const calculatedUnitPrice = round2(directCost + rushOrderCost + setupCost + shippingCost - discountCost + overheadProfitCost + partMarkCost + packagingCost);
-  const minPrice = rc.minimumPricePerUnit ?? 5.0;
-  const estimatedPricePerUnit = round2(Math.max(minPrice, calculatedUnitPrice));
+  const estimatedPricePerUnit = calculatedUnitPrice;
   // Operator chose to reuse the last confirmed price for this customer + part (see Odoo cross-check).
   const lastQuotedOverride = Number(part.priceOverrideUnit);
   const useLastQuoted =
@@ -228,10 +228,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     cerakoteWithoutMasking: fmtRate(coatRate),
     cerakoteWithMasking: fmtRate(coatRate + maskingRate),
     mediaBlasting: "Included ($0.00/SI)",
-    chemFilm: `$${chemFilmRate.toFixed(2)}/SI (with $${chemFilmMinFee} min lot fee)`,
-    minimumPricePerUnit: `$${minPrice.toFixed(2)}`,
+    chemFilm: `$${chemFilmRate.toFixed(2)}/SI ($${chemFilmMinFee} minimum applied once per quote)`,
     pricePerUnit: `$${pricePerUnit.toFixed(2)}`,
-    pricePerUnitMinText: `$${pricePerUnit.toFixed(2)} ($${minPrice.toFixed(2)}/unit min)`,
     totalLineItem: `$${totalLineItem.toFixed(2)}`,
   };
 
@@ -257,7 +255,6 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     totals: {
       baseCost: directCost,
       calculatedPrice: calculatedUnitPrice,
-      minimumPriceApplied: pricePerUnit > calculatedUnitPrice,
       pricePerUnit,
       totalLineItem,
     },

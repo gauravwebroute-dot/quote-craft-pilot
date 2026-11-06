@@ -120,15 +120,12 @@ export type PricingPartBreakdown = {
     cerakoteWithMasking: string;
     mediaBlasting: string;
     chemFilm: string;
-    minimumPricePerUnit: string;
     pricePerUnit: string;
-    pricePerUnitMinText: string;
     totalLineItem: string;
   };
   totals?: {
     baseCost: number;
     calculatedPrice: number;
-    minimumPriceApplied: boolean;
     pricePerUnit: number;
     totalLineItem: number;
   };
@@ -139,10 +136,10 @@ export type PricingResponse = {
   certificateOfConformance?: { required: boolean; rate: number; charge: number };
   chemFilm: {
     requested: boolean;
-    totalAreaSqIn: number;
-    calculatedCharge: number;
+    ratePerSqIn: number;
+    subtotal: number;
     minimumLotFee: number;
-    charge: number;
+    lotFee: number;
   };
   results: PricingPartBreakdown[];
 };
@@ -745,7 +742,7 @@ function PartDetailCard({
                       {
                         label: "Price per Unit",
                         value:
-                          summary?.pricePerUnitMinText || formatMoney(unitPrice),
+                          formatMoney(unitPrice),
                       },
                     ]}
                   />
@@ -790,12 +787,6 @@ function PartDetailCard({
                           {summary?.chemFilm || "—"}
                         </span>
                       </div>
-                      <div className="flex justify-between py-1 border-b border-border/30">
-                        <span className="font-semibold text-foreground">Minimum price/unit:</span>
-                        <span className="font-medium tabular-nums">
-                          {summary?.minimumPricePerUnit || "—"}
-                        </span>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -808,11 +799,6 @@ function PartDetailCard({
                       <span className="text-3xl font-black tabular-nums">
                         {formatMoney(unitPrice)}
                       </span>
-                      {summary?.minimumPricePerUnit ? (
-                        <span className="text-xs opacity-80">
-                          ({summary.minimumPricePerUnit} minimum price per unit)
-                        </span>
-                      ) : null}
                     </div>
                     <div className="text-right">
                       <span className="text-sm opacity-90 font-medium">
@@ -1592,6 +1578,28 @@ export function SectionExtraction({
                       )}
                     </tbody>
                     <tfoot>
+                      {pricing?.chemFilm?.requested ? (
+                        <>
+                          <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
+                            <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                              Other charges: Chem Film
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              {formatMoney(pricing.chemFilm.subtotal)}
+                            </td>
+                          </tr>
+                          {pricing.chemFilm.lotFee > 0 ? (
+                            <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
+                              <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                                Other charges: Chem Film Lot Fee (${pricing.chemFilm.minimumLotFee} minimum)
+                              </td>
+                              <td className="px-2 py-2 text-right tabular-nums">
+                                {formatMoney(pricing.chemFilm.lotFee)}
+                              </td>
+                            </tr>
+                          ) : null}
+                        </>
+                      ) : null}
                       {pricing?.certificateOfConformance?.required ? (
                         <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
                           <td colSpan={9} className="px-2 py-2 text-right font-semibold">
