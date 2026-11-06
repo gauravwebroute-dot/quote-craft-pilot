@@ -182,7 +182,7 @@ export function PricingModel({
         key: "QP_ESTIMATE" as const,
         label: "QP Estimate",
         available: true,
-        note: part.noDrawing ? "No drawing – minimum price only" : "Calculated",
+        note: part.noDrawing ? "No drawing – area needed" : "Calculated",
         viewable: true,
       },
     ],

@@ -3,7 +3,8 @@
  * per lot, etc. Edit these numbers to match real shop rates.
  */
 export const DEFAULT_RATE_CARD = {
-  minimumPricePerUnit: 5.0,
+  // Per-unit minimum price removed (client request). Minimums are now quote-level lot fees.
+  minimumPricePerUnit: 0,
   laborRatePerHour: 0,
   ovenLaborRatePerHour: 0,
 
@@ -40,7 +41,7 @@ export const DEFAULT_RATE_CARD = {
 
   chemFilm: {
     ratePerSqIn: 0.03, // $0.03/SI
-    minimumLotFee: 200.0, // $200 min lot fee
+    minimumLotFee: 200.0, // quote-level: one $200 minimum across all chem film charges
   },
 
   partMarkCostEach: 1.0,

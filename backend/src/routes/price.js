@@ -24,22 +24,21 @@ router.post("/price", (req, res) => {
     const results = parts.map((part) => calculatePartPrice(part, rateCard, adjustments));
 
     const pricedResults = results.filter((r) => r.priced);
-    const totalAreaSqIn = results.reduce(
-      (sum, result, index) => result.priced
-        ? sum + (parts[index].totalSurfaceAreaSqIn ?? parts[index].coatingAreaSqIn ?? 0) * result.quantity
-        : sum,
-      0,
+    // Chem film: sum of the per-part extended chem film prices, plus one quote-level minimum lot fee
+    // that only tops the total up to the minimum (never distributed into part prices).
+    const chemFilmSubtotal = round2(
+      pricedResults.reduce((sum, r) => sum + (r.adjustments?.chemFilm?.charge ?? 0), 0),
     );
-    const chemFilmRequested = adjustments?.chemFilm === true;
-    const chemFilmCalculated = totalAreaSqIn * rateCard.chemFilm.ratePerSqIn;
-    const chemFilmCharge = chemFilmRequested
-      ? Math.max(rateCard.chemFilm.minimumLotFee, chemFilmCalculated)
+    const chemFilmRequested = chemFilmSubtotal > 0;
+    const chemFilmLotFee = chemFilmRequested
+      ? round2(Math.max(0, rateCard.chemFilm.minimumLotFee - chemFilmSubtotal))
       : 0;
     const cocRequired = quoteOptions?.certificateRequired === true;
     const cocRate = Number(rateCard.extras?.certificateOfConformanceFlat) || 0;
     const cocCharge = cocRequired ? cocRate : 0;
     const quoteTotal = round2(
-      pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) + chemFilmCharge + cocCharge,
+      pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) +
+        chemFilmSubtotal + chemFilmLotFee + cocCharge,
     );
     const unpricedCount = results.length - pricedResults.length;
 
@@ -49,11 +48,10 @@ router.post("/price", (req, res) => {
       certificateOfConformance: { required: cocRequired, rate: cocRate, charge: round2(cocCharge) },
       chemFilm: {
         requested: chemFilmRequested,
-        totalAreaSqIn: round2(totalAreaSqIn),
         ratePerSqIn: rateCard.chemFilm.ratePerSqIn,
-        calculatedCharge: round2(chemFilmCalculated),
+        subtotal: chemFilmSubtotal,
         minimumLotFee: rateCard.chemFilm.minimumLotFee,
-        charge: round2(chemFilmCharge),
+        lotFee: chemFilmLotFee,
       },
       warning: unpricedCount > 0
         ? `${unpricedCount} of ${results.length} part(s) could not be priced — see each result's "reason".`
