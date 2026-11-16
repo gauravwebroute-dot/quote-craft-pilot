@@ -46,6 +46,7 @@ export type PartPatch = Partial<
     | "maskingAreaSqIn"
     | "bentFactor"
     | "bentFactorOverride"
+    | "priceSourceManual"
     | "sowFlatAreaSqIn"
     | "areaSource"
     | "estimationMethod"
@@ -200,8 +201,13 @@ export function PricingModel({
   const stored = (part.priceSource === "LAST_QUOTED" ? "HISTORY" : part.priceSource) as
     PricingSourceKey | undefined;
   // Default priority: PO → Odoo price list → pricing history → QP estimate.
-  const effective: PricingSourceKey =
-    stored && availableKeys.includes(stored) ? stored : (availableKeys[0] ?? "QP_ESTIMATE");
+  // A stored QP Estimate only sticks when the operator picked it by hand; otherwise the default
+  // priority applies, so a PO / price list / history price is used as soon as it becomes available.
+  const keepStored =
+    stored && availableKeys.includes(stored) && (stored !== "QP_ESTIMATE" || part.priceSourceManual === true);
+  const effective: PricingSourceKey = keepStored
+    ? stored!
+    : (availableKeys[0] ?? "QP_ESTIMATE");
 
   const selectedHistory =
     history.find((h) => h.id === part.priceRef) ?? (history.length ? history[0]! : undefined);
@@ -251,7 +257,12 @@ export function PricingModel({
     if (available) {
       setViewKey(null);
       if (key === "QP_ESTIMATE")
-        onPatch({ priceSource: "QP_ESTIMATE", priceOverrideUnit: undefined, priceRef: undefined });
+        onPatch({
+          priceSource: "QP_ESTIMATE",
+          priceSourceManual: true,
+          priceOverrideUnit: undefined,
+          priceRef: undefined,
+        });
       else {
         const u =
           key === "PO"
@@ -262,6 +273,7 @@ export function PricingModel({
         if (u != null)
           onPatch({
             priceSource: key,
+            priceSourceManual: true,
             priceOverrideUnit: u,
             priceRef: key === "HISTORY" ? selectedHistory?.id : undefined,
           });

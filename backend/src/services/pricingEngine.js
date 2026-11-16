@@ -38,22 +38,6 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     holesCount = part.dimensions.holeCount;
   }
 
-  // --- 1. Masking (PRD v2 Item 2) ---
-  const maskingRate = rc.masking?.ratePerSqIn ?? 0.06;
-  const isMaskingNeeded = maskedArea > 0 || holesCount > 0;
-  const maskingCost = isMaskingNeeded ? round2(totalArea * maskingRate) : 0;
-  const masking = {
-    totalArea: round2(totalArea),
-    maskedArea: round2(maskedArea),
-    holes: holesCount,
-    holesDescription: rc.masking?.defaultHoleDescription || "less than 1\" dia",
-    cost: maskingCost,
-    rateText: isMaskingNeeded
-      ? `+$${maskingRate.toFixed(2)} per SI of total area`
-      : "$0.00 (no masking required)",
-    unitCostText: `$${maskingCost.toFixed(2)} (unit)`,
-  };
-
   // --- 2. Media Blasting ---
   const blastMinPerSqIn = rc.mediaBlasting?.minPerSqIn ?? 0.03;
   const blastTime = round2(totalArea * blastMinPerSqIn);
@@ -93,6 +77,24 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const fmtRate = (perSqIn) =>
     usesSqFt ? `$${(perSqIn * SQ_IN_PER_SQ_FT).toFixed(2)}/SF` : `$${perSqIn.toFixed(2)}/SI`;
   const coatCost = round2(totalArea * coatRate);
+
+  // --- Masking (PRD v2 Item 2; priced from the coating rate, so it follows the coating section) ---
+  // Masking = 15% of the coating rate (rate card), charged on the total area.
+  const maskingRate = coatRate * (Number(rc.masking?.pctOfCoatingRate) || 0);
+  const isMaskingNeeded = maskedArea > 0 || holesCount > 0;
+  const maskingCost = isMaskingNeeded ? round2(totalArea * maskingRate) : 0;
+  const masking = {
+    totalArea: round2(totalArea),
+    maskedArea: round2(maskedArea),
+    holes: holesCount,
+    holesDescription: rc.masking?.defaultHoleDescription || "less than 1\" dia",
+    cost: maskingCost,
+    rateText: isMaskingNeeded
+      ? `+${fmtRate(maskingRate)} of total area (${((Number(rc.masking?.pctOfCoatingRate) || 0) * 100).toFixed(0)}% of coating rate)`
+      : "$0.00 (no masking required)",
+    unitCostText: `$${maskingCost.toFixed(2)} (unit)`,
+  };
+
   const materialOzPerSqIn = rc.coating?.materialOzPerSqIn ?? 0.0035;
   const materialOz = Math.round(totalArea * materialOzPerSqIn * 1000) / 1000;
 

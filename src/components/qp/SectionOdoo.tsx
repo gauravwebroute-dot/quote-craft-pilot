@@ -253,7 +253,7 @@ export function SectionOdoo({
     ? JSON.stringify([
         extraction.customer,
         extraction.parts.map(
-          ({ priceSource: _s, priceOverrideUnit: _o, priceRef: _r, ...rest }) => rest,
+          ({ priceSource: _s, priceSourceManual: _m, priceOverrideUnit: _o, priceRef: _r, ...rest }) => rest,
         ),
         businessUnit,
       ])

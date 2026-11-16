@@ -36,6 +36,15 @@ export interface OdooCsvRow {
   "Order Lines/Quantity": number;
 }
 
+/** Area per unit for the line description: SI rounded up to a whole number, SF rounded up to 0.5. */
+export function areaPerUnitText(areaSqIn: number, powder: boolean): string {
+  if (powder) {
+    const sf = Math.ceil((areaSqIn / 144) * 2 - 1e-9) / 2;
+    return `${sf.toFixed(1)} SF/unit`;
+  }
+  return `${Math.ceil(areaSqIn - 1e-9)} SI/unit`;
+}
+
 export function mapQuotePilotToOdooCsv(
   extractedParts: ExtractionPart[],
   customerName?: string | null,
@@ -44,7 +53,7 @@ export function mapQuotePilotToOdooCsv(
 ): OdooCsvRow[] {
   const customer = customerName?.trim() || "Standard Customer";
 
-  return extractedParts.map((part, index) => {
+  const partRows: OdooCsvRow[] = extractedParts.map((part, index) => {
     const priced = pricing?.results?.[index];
     // Never fall back to a made-up price: that is what produced "$30 = 6 x $5" quotes in Odoo.
     if (typeof priced?.pricePerUnit !== "number") {
@@ -80,18 +89,18 @@ export function mapQuotePilotToOdooCsv(
         ? Math.round((rates.coatingPerSi + (isMaskingNeeded ? (rates.maskingPerSi ?? 0) : 0)) * 10000) / 10000
         : "";
 
-    const baseName = part.partName || part.partSummary || part.partNumber || "Coating Line Item";
     const partNumber = part.partNumber || "";
     const rev = part.revision || "";
     const quantity = Number(part.quantity) || 1;
     const effectiveArea = coatingSqIn > 0 ? coatingSqIn : totalArea;
-    const maskText = maskingSqIn > 0 ? ` | Masking: ${maskingSqIn} si` : "";
-    const extra = part as { milSpecNotes?: string; specifications?: string };
-    const specs = extra.milSpecNotes || extra.specifications;
-    const specText = specs ? ` | Specs: ${specs}` : "";
-    const displayName =
-      partNumber && baseName !== partNumber ? `${partNumber} - ${baseName}` : baseName;
-    const fullDescription = `${displayName}${rev ? ` [Rev: ${rev}]` : ""} -- ${effectiveArea} si${maskText} | ${workType}${specText} ${ODOO_TEMP_TAG}`;
+    const unitName = partNumber || part.partName || part.partSummary || "Coating Line Item";
+    const colorText = part.coatingBom?.["color"] || part.coatingBom?.["topcoat"] || "Color TBD";
+    const fullDescription = [
+      unitName,
+      areaPerUnitText(effectiveArea, /powder/i.test(workType)),
+      workType,
+      colorText,
+    ].join("\n");
 
     return {
       Customer: customer,
@@ -107,6 +116,23 @@ export function mapQuotePilotToOdooCsv(
       "Order Lines/Quantity": quantity,
     };
   });
+
+  // Quote-level lot fees: each one is its own order line (quantity 1, the fee as the unit price).
+  const feeRows: OdooCsvRow[] = (pricing?.lotFees?.items ?? []).map((item) => ({
+    Customer: customer,
+    Tags: ODOO_TEMP_TAG,
+    "Customer Reference": quoteNumber || "",
+    "Order Lines/Products": item.product,
+    "Order Lines/Description": item.description,
+    "Order Lines/x_rev": "",
+    "Order Lines/x_sq_in": "",
+    "Order Lines/x_work_type": "",
+    "Order Lines/x_price_si": "",
+    "Order Lines/Unit Price": Number(item.fee.toFixed(2)),
+    "Order Lines/Quantity": 1,
+  }));
+
+  return [...partRows, ...feeRows];
 }
 
 function escapeCsvCell(value: unknown): string {
