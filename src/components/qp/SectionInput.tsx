@@ -112,6 +112,8 @@ export type ExtractionPart = {
   /** Set when the operator chose to reuse the last confirmed Odoo price for this customer + part. */
   priceSource?: "PO" | "PRICELIST" | "HISTORY" | "QP_ESTIMATE" | "LAST_QUOTED" | undefined;
   priceOverrideUnit?: number | undefined;
+  /** True once the operator picked a price source by hand (so the automatic default stops overriding it). */
+  priceSourceManual?: boolean | undefined;
   /** Where the surface area came from: drawing, CAD model, scope-of-work estimate, manual entry or unknown. */
   areaSource?: "drawing" | "cad" | "sow_estimate" | "manual" | "none" | undefined;
   /** Why the area could not be determined (shown instead of a bare "Unknown"). */

@@ -36,6 +36,7 @@ import { Field, KV, SubSection } from "./bits";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ExtractionResult, ExtractionPart } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import { buildQuoteNotes } from "@/lib/quoteNotes";
 import {
   DEFAULT_BENT_FACTOR,
   bentFactorPatch,
@@ -139,7 +140,17 @@ export type PricingResponse = {
     ratePerSqIn: number;
     subtotal: number;
     minimumLotFee: number;
-    lotFee: number;
+  };
+  lotFees?: {
+    items: Array<{
+      product: string;
+      description: string;
+      color: string | null;
+      groupTotal: number;
+      minimum: number;
+      fee: number;
+    }>;
+    total: number;
   };
   results: PricingPartBreakdown[];
 };
@@ -955,6 +966,7 @@ export function SectionExtraction({
   const [customerOpen, setCustomerOpen] = useState(true);
   const [chemFilmRequested, setChemFilmRequested] = useState(false);
   const [pricing, setPricing] = useState<PricingResponse | null>(null);
+  const quoteNotes = useMemo(() => buildQuoteNotes(extraction, pricing), [extraction, pricing]);
   const [pricingError, setPricingError] = useState<string | null>(null);
 
   // Fetch pricing from /api/price whenever extraction or chem film setting updates
@@ -1009,7 +1021,14 @@ export function SectionExtraction({
     ? JSON.stringify([
         extraction.customer,
         extraction.parts.map(
-          ({ priceSource: _s, priceOverrideUnit: _o, priceRef: _r, quantity: _q, ...rest }) => rest,
+          ({
+            priceSource: _s,
+            priceSourceManual: _m,
+            priceOverrideUnit: _o,
+            priceRef: _r,
+            quantity: _q,
+            ...rest
+          }) => rest,
         ),
         businessUnit,
       ])
@@ -1588,27 +1607,31 @@ export function SectionExtraction({
                               {formatMoney(pricing.chemFilm.subtotal)}
                             </td>
                           </tr>
-                          {pricing.chemFilm.lotFee > 0 ? (
-                            <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
-                              <td colSpan={9} className="px-2 py-2 text-right font-semibold">
-                                Other charges: Chem Film Lot Fee (${pricing.chemFilm.minimumLotFee} minimum)
-                              </td>
-                              <td className="px-2 py-2 text-right tabular-nums">
-                                {formatMoney(pricing.chemFilm.lotFee)}
-                              </td>
-                            </tr>
-                          ) : null}
                         </>
                       ) : null}
-                      {pricing?.certificateOfConformance?.required ? (
+                      {(pricing?.lotFees?.items ?? []).map((item) => (
+                        <tr
+                          key={item.description}
+                          className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20"
+                        >
+                          <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                            Other charges: {item.description}
+                            <span className="ml-1 font-normal text-muted-foreground">
+                              ({formatMoney(item.groupTotal)} of {formatMoney(item.minimum)} minimum)
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {formatMoney(item.fee)}
+                          </td>
+                        </tr>
+                      ))}
+                      {pricing?.certificateOfConformance?.required && pricing.certificateOfConformance.rate > 0 ? (
                         <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
                           <td colSpan={9} className="px-2 py-2 text-right font-semibold">
                             Certificate of conformance (required by customer)
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums">
-                            {pricing.certificateOfConformance.rate > 0
-                              ? formatMoney(pricing.certificateOfConformance.charge)
-                              : "Rate not set"}
+                            {formatMoney(pricing.certificateOfConformance.charge)}
                           </td>
                         </tr>
                       ) : null}
@@ -1630,6 +1653,16 @@ export function SectionExtraction({
                     </tfoot>
                   </table>
                 </div>
+                {quoteNotes.length > 0 ? (
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs dark:border-border dark:bg-muted/20">
+                    <div className="mb-1 font-semibold text-foreground">Quote notes</div>
+                    <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+                      {quoteNotes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           )}

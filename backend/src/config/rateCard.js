@@ -9,7 +9,9 @@ export const DEFAULT_RATE_CARD = {
   ovenLaborRatePerHour: 0,
 
   masking: {
-    ratePerSqIn: 0.06,
+    // Masking is priced as a share of the coating rate (client, Nov 2026): 15% of the coating rate,
+    // charged on the total area. Cerakote $0.40/SI -> $0.06/SI; powder $10/SF -> $1.50/SF.
+    pctOfCoatingRate: 0.15,
     sqInPerMinute: null,
     defaultHoleDescription: "less than 1\" dia",
   },
@@ -42,6 +44,47 @@ export const DEFAULT_RATE_CARD = {
   chemFilm: {
     ratePerSqIn: 0.03, // $0.03/SI
     minimumLotFee: 200.0, // quote-level: one $200 minimum across all chem film charges
+  },
+
+  // Quote-level lot fees (client, Nov 2026). Never added to part prices.
+  lotFees: {
+    minimumPerGroup: 150.0, // each (coating type x color family) group has its own $150 minimum
+    smallestFee: 25.0, // any lot fee that applies is at least $25
+    // Odoo product names, picked by coating type (first matching rule wins, last one is the catch-all).
+    products: [
+      { key: "powder", product: "Powder Lot Fee", match: "powder" },
+      { key: "ceramic", product: "Ceramic Lot Fee", match: "cerakote|ceramic" },
+      { key: "other", product: "Other Lot Fee", match: "" },
+    ],
+    chemFilmProduct: "Chemfilm Lot Fee",
+    // Base color families. Colors are grouped by the first family word found in the color text.
+    // Each entry: [family label, regex of words that belong to it].
+    colorFamilies: [
+      ["Black", "black"],
+      ["White", "white"],
+      ["Gray", "gr[ae]y"],
+      ["Silver", "silver"],
+      ["Gold", "gold"],
+      ["Bronze", "bronze"],
+      ["Copper", "copper"],
+      ["Red", "red"],
+      ["Orange", "orange"],
+      ["Yellow", "yellow"],
+      ["Green", "green"],
+      ["Blue", "blue"],
+      ["Purple", "purple"],
+      ["Pink", "pink"],
+      ["Brown", "brown"],
+      ["Tan", "tan"],
+      ["Beige", "beige"],
+      ["Cream / Ivory", "cream|ivory"],
+      ["Teal", "teal"],
+      ["Turquoise", "turquoise"],
+      ["Burgundy / Maroon", "burgundy|maroon"],
+      ["Champagne", "champagne"],
+      ["Clear / Transparent", "clear|transparent"],
+    ],
+    noColorLabel: "Color TBD",
   },
 
   partMarkCostEach: 1.0,

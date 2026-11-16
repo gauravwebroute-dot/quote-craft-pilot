@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { calculatePartPrice } from "../services/pricingEngine.js";
 import { DEFAULT_RATE_CARD } from "../config/rateCard.js";
+import { calculateLotFees } from "../services/lotFees.js";
 
 const router = Router();
 
@@ -30,15 +31,13 @@ router.post("/price", (req, res) => {
       pricedResults.reduce((sum, r) => sum + (r.adjustments?.chemFilm?.charge ?? 0), 0),
     );
     const chemFilmRequested = chemFilmSubtotal > 0;
-    const chemFilmLotFee = chemFilmRequested
-      ? round2(Math.max(0, rateCard.chemFilm.minimumLotFee - chemFilmSubtotal))
-      : 0;
+    const lotFees = calculateLotFees(parts, results, rateCard, chemFilmSubtotal);
     const cocRequired = quoteOptions?.certificateRequired === true;
     const cocRate = Number(rateCard.extras?.certificateOfConformanceFlat) || 0;
     const cocCharge = cocRequired ? cocRate : 0;
     const quoteTotal = round2(
       pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) +
-        chemFilmSubtotal + chemFilmLotFee + cocCharge,
+        chemFilmSubtotal + lotFees.total + cocCharge,
     );
     const unpricedCount = results.length - pricedResults.length;
 
@@ -51,8 +50,8 @@ router.post("/price", (req, res) => {
         ratePerSqIn: rateCard.chemFilm.ratePerSqIn,
         subtotal: chemFilmSubtotal,
         minimumLotFee: rateCard.chemFilm.minimumLotFee,
-        lotFee: chemFilmLotFee,
       },
+      lotFees,
       warning: unpricedCount > 0
         ? `${unpricedCount} of ${results.length} part(s) could not be priced — see each result's "reason".`
         : undefined,
@@ -75,6 +74,7 @@ function mergeRateCard(base, override) {
     mediaBlasting: { ...base.mediaBlasting, ...override.mediaBlasting },
     coating: { ...base.coating, ...override.coating },
     chemFilm: { ...base.chemFilm, ...override.chemFilm },
+    lotFees: { ...base.lotFees, ...override.lotFees },
     extras: { ...base.extras, ...override.extras },
     adjustments: { ...base.adjustments, ...override.adjustments },
   };
