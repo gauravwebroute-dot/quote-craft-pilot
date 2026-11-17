@@ -37,6 +37,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { ExtractionResult, ExtractionPart } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
 import { buildQuoteNotes } from "@/lib/quoteNotes";
+import { fmtRate, useRateDefaults, type RateUnit } from "@/lib/rates";
+import { RateInput } from "./RateInput";
 import {
   DEFAULT_BENT_FACTOR,
   bentFactorPatch,
@@ -65,6 +67,15 @@ export type PricingPartBreakdown = {
   priceSource?: string;
   totalLineItem?: number;
   reason?: string;
+  rates?: {
+    coatingPerSi: number;
+    maskingPerSi: number;
+    defaultCoatingPerSi: number;
+    defaultMaskingPerSi: number;
+    rateClass: string;
+    coatingOverridden: boolean;
+    maskingOverridden: boolean;
+  };
   breakdown?: {
     masking?: {
       totalArea: number;
@@ -119,6 +130,7 @@ export type PricingPartBreakdown = {
     processLabel?: string;
     cerakoteWithoutMasking: string;
     cerakoteWithMasking: string;
+    maskingExtra?: string;
     mediaBlasting: string;
     chemFilm: string;
     pricePerUnit: string;
@@ -230,6 +242,7 @@ interface PartDetailCardProps {
   poDocuments?: PricingDocument[];
   onPatch?: ((patch: PartPatch) => void) | undefined;
   globalBentFactor?: number;
+  rateUnit?: RateUnit;
 }
 
 function PartDetailCard({
@@ -243,7 +256,9 @@ function PartDetailCard({
   poDocuments = [],
   onPatch,
   globalBentFactor = DEFAULT_BENT_FACTOR,
+  rateUnit = "SF",
 }: PartDetailCardProps) {
+  const rateDefaults = useRateDefaults();
   const [manualArea, setManualArea] = useState("");
   const [bentInput, setBentInput] = useState("");
   const [activeTab, setActiveTab] = useState<string>("spec");
@@ -265,6 +280,14 @@ function PartDetailCard({
   const coating = pricing?.breakdown?.coating;
   const adjustments = pricing?.adjustments;
   const summary = pricing?.summary;
+  // Rate edits only change lines priced by the QuotePilot estimate.
+  const ratesEditable = !pricing?.priceSource || pricing.priceSource === "QP_ESTIMATE";
+  const setPartRate = (patch: { coatingPerSqIn?: number | undefined; maskingPerSqIn?: number | undefined }) => {
+    const merged = { ...part.rateOverride, ...patch };
+    if (merged.coatingPerSqIn === undefined) delete merged.coatingPerSqIn;
+    if (merged.maskingPerSqIn === undefined) delete merged.maskingPerSqIn;
+    onPatch?.({ rateOverride: Object.keys(merged).length ? merged : undefined });
+  };
 
   const unitPrice = pricing?.pricePerUnit ?? 5.0;
   const lineTotal = pricing?.totalLineItem ?? unitPrice * quantity;
@@ -657,7 +680,9 @@ function PartDetailCard({
                       {
                         label: "Cost",
                         value: masking ? `$${masking.cost.toFixed(2)} (unit)` : "—",
-                        parenthetical: masking?.rateText,
+                        parenthetical: pricing?.rates
+                          ? `+${fmtRate(pricing.rates.maskingPerSi, rateUnit)} of total area (${pricing.rates.maskingOverridden ? "custom rate" : `${Math.round((rateDefaults?.maskingPctOfCoatingRate ?? 0) * 100)}% of coating rate`})`
+                          : masking?.rateText,
                       },
                     ]}
                   />
@@ -695,7 +720,9 @@ function PartDetailCard({
                       {
                         label: "Cost",
                         value: coating?.costText || "—",
-                        parenthetical: coating?.costRateText,
+                        parenthetical: pricing?.rates
+                          ? `${fmtRate(pricing.rates.coatingPerSi, rateUnit)}${pricing.rates.coatingOverridden ? " (custom rate)" : ""}`
+                          : coating?.costRateText,
                       },
                       {
                         label: "Material",
@@ -768,22 +795,61 @@ function PartDetailCard({
                   </h4>
                   <div className="grid gap-2 sm:grid-cols-2 divide-y sm:divide-y-0 divide-border/40 text-sm">
                     <div className="space-y-1.5">
-                      <div className="flex justify-between py-1 border-b border-border/30">
+                      <div className="flex items-center justify-between gap-2 py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">
-                          {summary?.processLabel || "Coating"} without masking:
+                          {summary?.processLabel || "Coating"} rate:
                         </span>
-                        <span className="font-medium tabular-nums">
-                          {summary?.cerakoteWithoutMasking || "—"}
-                        </span>
+                        {pricing?.rates ? (
+                          <RateInput
+                            ariaLabel="Coating rate for this part"
+                            value={pricing.rates.coatingPerSi}
+                            unit={rateUnit}
+                            modified={part.rateOverride?.coatingPerSqIn !== undefined}
+                            disabled={!ratesEditable}
+                            onCommit={(v) => setPartRate({ coatingPerSqIn: v })}
+                          />
+                        ) : (
+                          <span className="font-medium tabular-nums">—</span>
+                        )}
                       </div>
-                      <div className="flex justify-between py-1 border-b border-border/30">
+                      <div className="flex items-center justify-between gap-2 py-1 border-b border-border/30">
                         <span className="font-semibold text-foreground">
-                          {summary?.processLabel || "Coating"} with masking:
+                          Masking (extra):
+                          {pricing?.rates && masking && masking.cost === 0 ? (
+                            <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                              not needed on this part
+                            </span>
+                          ) : null}
                         </span>
-                        <span className="font-medium tabular-nums">
-                          {summary?.cerakoteWithMasking || "—"}
-                        </span>
+                        {pricing?.rates ? (
+                          <RateInput
+                            ariaLabel="Masking rate for this part"
+                            value={pricing.rates.maskingPerSi}
+                            unit={rateUnit}
+                            modified={part.rateOverride?.maskingPerSqIn !== undefined}
+                            disabled={!ratesEditable}
+                            onCommit={(v) => setPartRate({ maskingPerSqIn: v })}
+                          />
+                        ) : (
+                          <span className="font-medium tabular-nums">—</span>
+                        )}
                       </div>
+                      {!ratesEditable && pricing?.priceSource ? (
+                        <p className="py-1 text-[11px] text-muted-foreground">
+                          This line is priced from {pricing.priceSource === "PO" ? "the PO" : pricing.priceSource === "PRICELIST" ? "the Odoo price list" : pricing.priceSource === "HISTORY" ? "pricing history" : "a saved price"}, so rate edits do not change it. They only affect the QP Estimate.
+                        </p>
+                      ) : null}
+                      {part.rateOverride &&
+                      (part.rateOverride.coatingPerSqIn !== undefined ||
+                        part.rateOverride.maskingPerSqIn !== undefined) ? (
+                        <button
+                          type="button"
+                          onClick={() => onPatch?.({ rateOverride: undefined })}
+                          className="py-1 text-left text-[11px] font-semibold text-primary underline-offset-2 hover:underline"
+                        >
+                          Reset this part to the quote rates
+                        </button>
+                      ) : null}
                       <div className="flex justify-between py-1">
                         <span className="font-semibold text-foreground">Media Blasting:</span>
                         <span className="font-medium tabular-nums">
@@ -992,6 +1058,7 @@ export function SectionExtraction({
       body: JSON.stringify({
         parts: extraction.parts,
         adjustments: { chemFilm: chemFilmRequested },
+        rateOverrides: extraction.rateOverrides ?? {},
         quoteOptions: { certificateRequired: extraction.purchaseOrder?.certificateRequired === true },
       }),
     })
@@ -1024,6 +1091,7 @@ export function SectionExtraction({
           ({
             priceSource: _s,
             priceSourceManual: _m,
+            rateOverride: _ro,
             priceOverrideUnit: _o,
             priceRef: _r,
             quantity: _q,
@@ -1351,6 +1419,7 @@ export function SectionExtraction({
           poDocuments={poDocuments}
           onPatch={(patch) => onPatchPart?.(selectedPartIndex, patch)}
           globalBentFactor={globalBentFactor}
+          rateUnit={extraction?.rateUnit ?? "SF"}
         />
       ) : (
         <>

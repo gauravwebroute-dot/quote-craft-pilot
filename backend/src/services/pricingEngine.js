@@ -7,7 +7,19 @@
  * @param {object} [rateCard] - shop rate card
  * @param {object} [overrides] - per-quote adjustments
  */
-export function calculatePartPrice(part, rateCard, overrides = {}) {
+import { lotFeeProduct } from "./lotFees.js";
+
+const validRate = (v) => {
+  const n = Number(v);
+  return v !== null && v !== undefined && v !== "" && Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+/**
+ * @param rateOverrides optional per-quote rate overrides, all in $ per square inch:
+ *   { powder|ceramic|other: { coating?, masking? }, chemFilm? }. A part's own `rateOverride`
+ *   ({ coatingPerSqIn?, maskingPerSqIn? }) wins over these. The rate card itself is never changed.
+ */
+export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides = {}) {
   const missing = [];
   const area = part.coatingAreaSqIn ?? part.totalSurfaceAreaSqIn;
   if (area == null) missing.push("surface area (coatingAreaSqIn or totalSurfaceAreaSqIn)");
@@ -68,11 +80,18 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const ruleSqFt = Number(rateRule?.ratePerSqFt);
   const ruleSqIn = Number(rateRule?.ratePerSqIn);
   const usesSqFt = Number.isFinite(ruleSqFt) && ruleSqFt > 0;
-  const coatRate = usesSqFt
+  const coatRateDefault = usesSqFt
     ? ruleSqFt / SQ_IN_PER_SQ_FT
     : Number.isFinite(ruleSqIn) && ruleSqIn > 0
       ? ruleSqIn
       : (rc.coating?.ratePerSqIn ?? 0.40);
+  // Per-quote overrides (QuotePilot estimate only): this part's own rate, else the quote-wide rate for its
+  // coating type (powder / ceramic = Cerakote / other), else the rate card default.
+  const rateClass = lotFeeProduct(part, rc.lotFees ?? {})?.key ?? "other";
+  const classOv = rateOverrides?.[rateClass] ?? {};
+  const partOv = part.rateOverride ?? {};
+  const coatOverride = validRate(partOv.coatingPerSqIn) ?? validRate(classOv.coating);
+  const coatRate = coatOverride ?? coatRateDefault;
   // Show the rate in the unit it was agreed in ($/SF for rules given per SF, otherwise $/SI).
   const fmtRate = (perSqIn) =>
     usesSqFt ? `$${(perSqIn * SQ_IN_PER_SQ_FT).toFixed(2)}/SF` : `$${perSqIn.toFixed(2)}/SI`;
@@ -80,7 +99,10 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
 
   // --- Masking (PRD v2 Item 2; priced from the coating rate, so it follows the coating section) ---
   // Masking = 15% of the coating rate (rate card), charged on the total area.
-  const maskingRate = coatRate * (Number(rc.masking?.pctOfCoatingRate) || 0);
+  // A masking rate typed in by the operator (this part, else quote-wide) is used as is; otherwise it follows the coating rate.
+  const maskPct = Number(rc.masking?.pctOfCoatingRate) || 0;
+  const maskOverride = validRate(partOv.maskingPerSqIn) ?? validRate(classOv.masking);
+  const maskingRate = maskOverride ?? coatRate * maskPct;
   const isMaskingNeeded = maskedArea > 0 || holesCount > 0;
   const maskingCost = isMaskingNeeded ? round2(totalArea * maskingRate) : 0;
   const masking = {
@@ -90,7 +112,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     holesDescription: rc.masking?.defaultHoleDescription || "less than 1\" dia",
     cost: maskingCost,
     rateText: isMaskingNeeded
-      ? `+${fmtRate(maskingRate)} of total area (${((Number(rc.masking?.pctOfCoatingRate) || 0) * 100).toFixed(0)}% of coating rate)`
+      ? `+${fmtRate(maskingRate)} of total area (${maskOverride !== null ? "custom rate" : `${(maskPct * 100).toFixed(0)}% of coating rate`})`
       : "$0.00 (no masking required)",
     unitCostText: `$${maskingCost.toFixed(2)} (unit)`,
   };
@@ -146,7 +168,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
   const overheadProfitCost = round2(directCost * overheadPct);
 
   const chemFilmRequested = Boolean(overrides.chemFilm || adj.chemFilm);
-  const chemFilmRate = rc.chemFilm?.ratePerSqIn ?? 0.03;
+  const chemFilmRate = validRate(rateOverrides?.chemFilm) ?? rc.chemFilm?.ratePerSqIn ?? 0.03;
   const chemFilmMinFee = rc.chemFilm?.minimumLotFee ?? 200;
   // Extended chem film price for this part. The $200 minimum is a quote-level lot fee (see routes/price.js).
   const chemFilmCalculated = round2(totalArea * quantity * chemFilmRate);
@@ -229,6 +251,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     processLabel,
     cerakoteWithoutMasking: fmtRate(coatRate),
     cerakoteWithMasking: fmtRate(coatRate + maskingRate),
+    maskingExtra: fmtRate(maskingRate),
     mediaBlasting: "Included ($0.00/SI)",
     chemFilm: `$${chemFilmRate.toFixed(2)}/SI ($${chemFilmMinFee} minimum applied once per quote)`,
     pricePerUnit: `$${pricePerUnit.toFixed(2)}`,
@@ -253,7 +276,15 @@ export function calculatePartPrice(part, rateCard, overrides = {}) {
     },
     adjustments,
     summary,
-    rates: { coatingPerSi: coatRate, maskingPerSi: maskingRate },
+    rates: {
+      coatingPerSi: coatRate,
+      maskingPerSi: maskingRate,
+      defaultCoatingPerSi: coatRateDefault,
+      defaultMaskingPerSi: coatRateDefault * maskPct,
+      rateClass,
+      coatingOverridden: coatOverride !== null,
+      maskingOverridden: maskOverride !== null,
+    },
     totals: {
       baseCost: directCost,
       calculatedPrice: calculatedUnitPrice,

@@ -1,6 +1,7 @@
 import type { ExtractionPart } from "@/components/qp/SectionInput";
 import type { PricingResponse } from "@/components/qp/SectionExtraction";
 import { apiBaseUrl } from "@/lib/businessUnits";
+import type { RateOverrides } from "@/lib/rates";
 
 /**
  * Maps QuotePilot extracted + priced parts to Odoo Sales Import CSV format (PRD v2 Item 6).
@@ -165,11 +166,14 @@ export function generateOdooCsvString(rows: OdooCsvRow[]): string {
   return [headerLine, ...dataLines].join("\r\n");
 }
 
-async function fetchPricing(parts: ExtractionPart[]): Promise<PricingResponse> {
+async function fetchPricing(
+  parts: ExtractionPart[],
+  rateOverrides?: RateOverrides,
+): Promise<PricingResponse> {
   const response = await fetch(`${apiBaseUrl()}/api/price`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ parts, adjustments: { chemFilm: false } }),
+    body: JSON.stringify({ parts, adjustments: { chemFilm: false }, rateOverrides: rateOverrides ?? {} }),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.message || "Pricing calculation failed.");
@@ -183,8 +187,9 @@ export async function downloadOdooCsv(
   pricing?: PricingResponse | null,
   filename?: string,
   quoteNumber?: string | null,
+  rateOverrides?: RateOverrides,
 ) {
-  const priced = pricing ?? (await fetchPricing(extractedParts));
+  const priced = pricing ?? (await fetchPricing(extractedParts, rateOverrides));
   const rows = mapQuotePilotToOdooCsv(extractedParts, customerName, priced, quoteNumber);
   const csvContent = generateOdooCsvString(rows);
 

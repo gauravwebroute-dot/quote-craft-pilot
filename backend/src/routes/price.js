@@ -11,7 +11,7 @@ const router = Router();
 // (or manually filled in, e.g. after an estimator supplies area by hand).
 router.post("/price", (req, res) => {
   try {
-    const { parts, rateCard: rateCardOverride, adjustments, quoteOptions } = req.body ?? {};
+    const { parts, rateCard: rateCardOverride, adjustments, quoteOptions, rateOverrides } = req.body ?? {};
 
     if (!Array.isArray(parts) || parts.length === 0) {
       return res.status(400).json({
@@ -22,7 +22,7 @@ router.post("/price", (req, res) => {
 
     const rateCard = mergeRateCard(DEFAULT_RATE_CARD, rateCardOverride);
 
-    const results = parts.map((part) => calculatePartPrice(part, rateCard, adjustments));
+    const results = parts.map((part) => calculatePartPrice(part, rateCard, adjustments, rateOverrides));
 
     const pricedResults = results.filter((r) => r.priced);
     // Chem film: sum of the per-part extended chem film prices, plus one quote-level minimum lot fee
@@ -63,6 +63,24 @@ router.post("/price", (req, res) => {
       message: err instanceof Error ? err.message : "Unknown error during pricing.",
     });
   }
+});
+
+// GET /api/price/defaults - the rate card defaults the quote screen pre-fills (all $ per square inch).
+router.get("/price/defaults", (_req, res) => {
+  const rc = DEFAULT_RATE_CARD;
+  const powderRule = (rc.coating?.processRates ?? []).find((r) => /powder/i.test(r?.match ?? "powder"));
+  const powder = Number(powderRule?.ratePerSqFt) > 0
+    ? Number(powderRule.ratePerSqFt) / 144
+    : Number(powderRule?.ratePerSqIn) || rc.coating.ratePerSqIn;
+  const pct = Number(rc.masking?.pctOfCoatingRate) || 0;
+  const cerakote = rc.coating.ratePerSqIn;
+  res.json({
+    maskingPctOfCoatingRate: pct,
+    powder: { coating: powder, masking: powder * pct },
+    ceramic: { coating: cerakote, masking: cerakote * pct },
+    other: { coating: cerakote, masking: cerakote * pct },
+    chemFilm: rc.chemFilm.ratePerSqIn,
+  });
 });
 
 function mergeRateCard(base, override) {

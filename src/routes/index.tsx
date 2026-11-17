@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { TopNav } from "@/components/qp/TopNav";
 import { RfqHeader } from "@/components/qp/RfqHeader";
 import { SectionInput, type ExtractionResult } from "@/components/qp/SectionInput";
+import { RateSettings } from "@/components/qp/RateSettings";
 import { SectionExtraction } from "@/components/qp/SectionExtraction";
 import { SectionOdoo } from "@/components/qp/SectionOdoo";
 import { TreeMenu, type NavigationTarget } from "@/components/qp/TreeMenu";
@@ -249,6 +250,15 @@ function QuotePilot() {
                 quoteNumber={activeQuoteNumber}
                 extraction={extraction}
               />
+              {extraction?.parts.length ? (
+                <RateSettings
+                  rateOverrides={extraction.rateOverrides}
+                  unit={extraction.rateUnit ?? "SF"}
+                  onChange={(next) =>
+                    setExtraction((prev) => (prev ? { ...prev, ...next } : prev))
+                  }
+                />
+              ) : null}
             </aside>
           )}
 

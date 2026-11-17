@@ -172,7 +172,14 @@ export function QuoteHistoryDialog({
       const customer = quote.customerName || "Customer";
       const filename = `${quote.odooSequenceId || quote.draftSequenceId}_odoo_import.csv`;
 
-      await downloadOdooCsv(parts, customer, null, filename, quote.draftSequenceId);
+      await downloadOdooCsv(
+        parts,
+        customer,
+        null,
+        filename,
+        quote.draftSequenceId,
+        quoteDetails?.formPayload?.rateOverrides,
+      );
       setActionMessage(`Exported ${filename}`);
     } catch (err) {
       setActionMessage("Export failed.");

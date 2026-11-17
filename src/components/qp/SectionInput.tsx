@@ -1,3 +1,4 @@
+import type { RateOverrides, RateUnit } from "@/lib/rates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -114,6 +115,8 @@ export type ExtractionPart = {
   priceOverrideUnit?: number | undefined;
   /** True once the operator picked a price source by hand (so the automatic default stops overriding it). */
   priceSourceManual?: boolean | undefined;
+  /** This part's own coating / masking rate ($ per square inch), set by hand. Wins over the quote-wide rates. */
+  rateOverride?: { coatingPerSqIn?: number | undefined; maskingPerSqIn?: number | undefined } | undefined;
   /** Where the surface area came from: drawing, CAD model, scope-of-work estimate, manual entry or unknown. */
   areaSource?: "drawing" | "cad" | "sow_estimate" | "manual" | "none" | undefined;
   /** Why the area could not be determined (shown instead of a bare "Unknown"). */
@@ -144,6 +147,10 @@ export type ExtractionResult = {
   purchaseOrder?: PurchaseOrderData | undefined;
   /** Decision taken in the duplicate-PDF popup, if any. */
   duplicateAction?: "revision" | "new" | null | undefined;
+  /** Quote-wide coating / masking / chem film rates typed in by the operator ($ per square inch). */
+  rateOverrides?: RateOverrides | undefined;
+  /** Unit the rates are shown in (default SF). */
+  rateUnit?: RateUnit | undefined;
 };
 
 export type ModelOption = {

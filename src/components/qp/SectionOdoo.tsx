@@ -253,7 +253,7 @@ export function SectionOdoo({
     ? JSON.stringify([
         extraction.customer,
         extraction.parts.map(
-          ({ priceSource: _s, priceSourceManual: _m, priceOverrideUnit: _o, priceRef: _r, ...rest }) => rest,
+          ({ priceSource: _s, priceSourceManual: _m, rateOverride: _ro, priceOverrideUnit: _o, priceRef: _r, ...rest }) => rest,
         ),
         businessUnit,
       ])
@@ -296,6 +296,7 @@ export function SectionOdoo({
         null,
         `${syncedOrder || quoteNumber || "quotation"}_odoo_import.csv`,
         quoteNumber,
+        extraction.rateOverrides,
       );
       // Exporting commits the quote (number is used, same-PDF reminder starts working).
       if (quoteNumber) {
