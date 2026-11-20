@@ -153,6 +153,14 @@ export type PricingResponse = {
     subtotal: number;
     minimumLotFee: number;
   };
+  partMarking?: {
+    required: boolean;
+    units: number;
+    ratePerUnit: number;
+    minimumCharge: number;
+    charge: number;
+    product: string;
+  };
   lotFees?: {
     items: Array<{
       product: string;
@@ -1573,6 +1581,9 @@ export function SectionExtraction({
                           Sq. In. / Unit
                         </th>
                         <th className="border-r border-slate-300 px-2 py-3">Work Type</th>
+                        <th className="border-r border-slate-300 px-1.5 py-3 text-center" title="Part marking (laser engraving after coating)">
+                          Mark
+                        </th>
                         <th className="border-r border-slate-300 px-2 py-3">Price Model</th>
                         <th className="border-r border-slate-300 px-2 py-3 text-right">
                           <span className="inline-flex items-center justify-end gap-1">
@@ -1630,6 +1641,18 @@ export function SectionExtraction({
                                 {row.workType}
                               </span>
                             </td>
+                            <td
+                              className="border-r border-slate-200 px-1.5 py-3.5 text-center"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                aria-label={`Part marking for ${row.partNumber ?? `line ${row.num}`}`}
+                                checked={parts[idx]?.partMark === true}
+                                onChange={(e) => onPatchPart?.(idx, { partMark: e.target.checked })}
+                                className="size-4 cursor-pointer accent-[#14532d]"
+                              />
+                            </td>
                             <td className="border-r border-slate-200 px-1.5 py-2.5">
                               <PricingModel
                                 variant="cell"
@@ -1657,7 +1680,7 @@ export function SectionExtraction({
                       ) : (
                         <tr>
                           <td
-                            colSpan={10}
+                            colSpan={11}
                             className="py-8 text-center text-muted-foreground text-sm"
                           >
                             No parts extracted yet. Upload drawings or email text to run extraction.
@@ -1669,7 +1692,7 @@ export function SectionExtraction({
                       {pricing?.chemFilm?.requested ? (
                         <>
                           <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
-                            <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                            <td colSpan={10} className="px-2 py-2 text-right font-semibold">
                               Other charges: Chem Film
                             </td>
                             <td className="px-2 py-2 text-right tabular-nums">
@@ -1683,7 +1706,7 @@ export function SectionExtraction({
                           key={item.description}
                           className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20"
                         >
-                          <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                          <td colSpan={10} className="px-2 py-2 text-right font-semibold">
                             Other charges: {item.description}
                             <span className="ml-1 font-normal text-muted-foreground">
                               ({formatMoney(item.groupTotal)} of {formatMoney(item.minimum)} minimum)
@@ -1694,9 +1717,22 @@ export function SectionExtraction({
                           </td>
                         </tr>
                       ))}
+                      {pricing?.partMarking?.required && pricing.partMarking.charge > 0 ? (
+                        <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
+                          <td colSpan={10} className="px-2 py-2 text-right font-semibold">
+                            Other charges: Part Marking
+                            <span className="ml-1 font-normal text-muted-foreground">
+                              ({pricing.partMarking.units} units, {formatMoney(pricing.partMarking.minimumCharge)} minimum)
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {formatMoney(pricing.partMarking.charge)}
+                          </td>
+                        </tr>
+                      ) : null}
                       {pricing?.certificateOfConformance?.required && pricing.certificateOfConformance.rate > 0 ? (
                         <tr className="border-t border-slate-300 bg-slate-50/60 text-xs dark:bg-muted/20">
-                          <td colSpan={9} className="px-2 py-2 text-right font-semibold">
+                          <td colSpan={10} className="px-2 py-2 text-right font-semibold">
                             Certificate of conformance (required by customer)
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums">
@@ -1705,7 +1741,7 @@ export function SectionExtraction({
                         </tr>
                       ) : null}
                       <tr className="border-t-2 border-slate-300 bg-slate-50/80 dark:border-border dark:bg-muted/30">
-                        <td colSpan={8} className="px-2 py-3.5 text-right font-bold tracking-wide">
+                        <td colSpan={9} className="px-2 py-3.5 text-right font-bold tracking-wide">
                           TOTAL
                         </td>
                         <td className="border-r border-slate-200 px-1.5 py-3.5 text-right font-bold tabular-nums text-muted-foreground">

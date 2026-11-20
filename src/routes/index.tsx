@@ -329,6 +329,7 @@ function QuotePilot() {
                   setFocusedSection("overview");
                 }}
                 extraction={extraction}
+                sourceFiles={[...uploadedFiles, ...poFiles]}
                 quoteNumber={draftSequenceId}
                 businessUnit={businessUnit}
                 onSyncComplete={(odooName) => {

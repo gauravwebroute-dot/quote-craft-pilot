@@ -32,12 +32,21 @@ router.post("/price", (req, res) => {
     );
     const chemFilmRequested = chemFilmSubtotal > 0;
     const lotFees = calculateLotFees(parts, results, rateCard, chemFilmSubtotal);
+
+    // Part marking: one charge for the whole quote, from the total quantity of the parts that need it.
+    const pm = rateCard.partMarking ?? {};
+    const markedParts = (parts ?? []).filter((p) => p?.partMark === true);
+    const markedUnits = markedParts.reduce((sum, p) => sum + (Number(p.quantity) > 0 ? Number(p.quantity) : 1), 0);
+    const partMarkingCharge =
+      markedParts.length > 0
+        ? round2(Math.max(Number(pm.minimumCharge) || 0, markedUnits * (Number(pm.ratePerUnit) || 0)))
+        : 0;
     const cocRequired = quoteOptions?.certificateRequired === true;
     const cocRate = Number(rateCard.extras?.certificateOfConformanceFlat) || 0;
     const cocCharge = cocRequired ? cocRate : 0;
     const quoteTotal = round2(
       pricedResults.reduce((sum, r) => sum + r.totalLineItem, 0) +
-        chemFilmSubtotal + lotFees.total + cocCharge,
+        chemFilmSubtotal + lotFees.total + partMarkingCharge + cocCharge,
     );
     const unpricedCount = results.length - pricedResults.length;
 
@@ -52,6 +61,14 @@ router.post("/price", (req, res) => {
         minimumLotFee: rateCard.chemFilm.minimumLotFee,
       },
       lotFees,
+      partMarking: {
+        required: markedParts.length > 0,
+        units: markedUnits,
+        ratePerUnit: Number(pm.ratePerUnit) || 0,
+        minimumCharge: Number(pm.minimumCharge) || 0,
+        charge: partMarkingCharge,
+        product: pm.product || "Part Marking",
+      },
       warning: unpricedCount > 0
         ? `${unpricedCount} of ${results.length} part(s) could not be priced — see each result's "reason".`
         : undefined,
@@ -92,6 +109,7 @@ function mergeRateCard(base, override) {
     mediaBlasting: { ...base.mediaBlasting, ...override.mediaBlasting },
     coating: { ...base.coating, ...override.coating },
     chemFilm: { ...base.chemFilm, ...override.chemFilm },
+    partMarking: { ...base.partMarking, ...override.partMarking },
     lotFees: { ...base.lotFees, ...override.lotFees },
     extras: { ...base.extras, ...override.extras },
     adjustments: { ...base.adjustments, ...override.adjustments },

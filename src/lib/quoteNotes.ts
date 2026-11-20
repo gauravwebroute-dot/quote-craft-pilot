@@ -22,8 +22,6 @@ export function buildQuoteNotes(
   if (coc?.required && !(coc.rate > 0)) {
     notes.push("Certificate of conformance required with each shipment (no charge listed).");
   }
-  const marked = partsWith((p) => p.partMark === true);
-  if (marked) notes.push(`Part marking required on ${marked} (no charge listed).`);
   const packaged = partsWith((p) => Boolean(p.packagingNote));
   if (packaged) notes.push(`Special packaging / cleanliness requirements on ${packaged} (no charge listed).`);
   if (extraction.purchaseOrder?.firstArticleRequired) {
