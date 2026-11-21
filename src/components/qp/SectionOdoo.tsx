@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ExtractionResult } from "./SectionInput";
-import { downloadOdooCsv } from "@/lib/odooCsvExport";
+import { buildOdooSyncLines, priceForOdoo, downloadOdooCsv } from "@/lib/odooCsvExport";
 import { commitQuote } from "@/lib/quoteCommit";
 
 export type PriorQuoteDetail = {
@@ -164,6 +164,7 @@ function money(n?: number) {
 export function SectionOdoo({
   onBack,
   extraction,
+  sourceFiles = [],
   quoteNumber,
   businessUnit = "OC Custom Coating",
   onSyncComplete,
@@ -171,6 +172,8 @@ export function SectionOdoo({
   onViewQuote,
   onApplyPrice,
 }: {
+  /** The customer files uploaded in this session. Kept in the browser only; sent to Odoo as attachments. */
+  sourceFiles?: File[];
   /** Opens an earlier quote (full extracted data, specs and price breakdown) in the app. */
   onViewQuote?: (quote: Record<string, unknown>, payload: ExtractionResult) => void;
   /** Reuse the last confirmed price (LAST_QUOTED) or fall back to the QuotePilot estimate. */
@@ -198,6 +201,62 @@ export function SectionOdoo({
   // Reconciliation / Conflict resolution state (REQ-008, Section 6.2)
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [syncedOrder, setSyncedOrder] = useState<string | null>(null);
+  const [syncedOrderId, setSyncedOrderId] = useState<number | null>(null);
+
+  // Files for the Odoo quotation: this session's uploads, anything added here (for example when the quote
+  // is reopened another day), and the RFQ email text as a .txt. QuotePilot never stores the files.
+  const [extraFiles, setExtraFiles] = useState<File[]>([]);
+  const [attachStatus, setAttachStatus] = useState<{
+    attached: string[];
+    skipped: string[];
+    failed: Array<{ name: string; error: string }>;
+    error?: string;
+  } | null>(null);
+  const [isAttaching, setIsAttaching] = useState(false);
+  const filesToAttach = (() => {
+    const seen = new Set<string>();
+    const out: File[] = [];
+    for (const f of [...sourceFiles, ...extraFiles]) {
+      const key = `${f.name}|${f.size}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(f);
+      }
+    }
+    const emailText = extraction?.rfqEmailText?.trim();
+    if (emailText) {
+      out.push(
+        new File([emailText], `RFQ_email_${quoteNumber || "quote"}.txt`, { type: "text/plain" }),
+      );
+    }
+    return out;
+  })();
+
+  const attachFiles = async (orderId: number) => {
+    if (!filesToAttach.length) {
+      setAttachStatus({ attached: [], skipped: [], failed: [] });
+      return;
+    }
+    setIsAttaching(true);
+    try {
+      const form = new FormData();
+      form.append("saleOrderId", String(orderId));
+      filesToAttach.forEach((f) => form.append("files", f, f.name));
+      const res = await fetch(`${apiUrl()}/api/odoo/attachments`, { method: "POST", body: form });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "Attaching files to Odoo failed.");
+      setAttachStatus({ attached: body.attached ?? [], skipped: body.skipped ?? [], failed: body.failed ?? [] });
+    } catch (err) {
+      setAttachStatus({
+        attached: [],
+        skipped: [],
+        failed: [],
+        error: err instanceof Error ? err.message : "Attaching files to Odoo failed.",
+      });
+    } finally {
+      setIsAttaching(false);
+    }
+  };
 
   const [creatingPart, setCreatingPart] = useState<string | null>(null);
   const [createResults, setCreateResults] = useState<
@@ -317,12 +376,18 @@ export function SectionOdoo({
     setIsSyncing(true);
     setError(null);
     try {
+      // Same lines as the CSV export: part lines, lot fee lines and the part marking line.
+      const customerName =
+        extraction.customer?.company || extraction.customer?.contact || "Standard Customer";
+      const pricing = await priceForOdoo(extraction.parts, extraction.rateOverrides);
+      const orderLines = buildOdooSyncLines(extraction.parts, pricing, customerName, quoteNumber);
       const response = await fetch(`${apiUrl()}/api/odoo/create-quotation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customer: extraction.customer,
           parts: extraction.parts,
+          orderLines,
           businessUnit,
           formPayload: { ...extraction, draftSequenceId: quoteNumber, businessUnit },
           confirm: true,
@@ -340,6 +405,15 @@ export function SectionOdoo({
         );
       }
       setSyncedOrder(createdOrderName);
+      const createdOrderId = Number(payload.created?.saleOrderId);
+      if (Number.isInteger(createdOrderId) && createdOrderId > 0) {
+        setSyncedOrderId(createdOrderId);
+        // The quotation exists now; a problem with the files never undoes it.
+        void attachFiles(createdOrderId);
+      }
+      if (Array.isArray(payload.created?.warnings) && payload.created.warnings.length) {
+        setError(payload.created.warnings.join(" "));
+      }
 
       // Commit once: browser copy + database copy, status SYNCED. Numbering advances exactly once.
       if (quoteNumber) {
@@ -514,6 +588,74 @@ export function SectionOdoo({
           )}
         </div>
       </div>
+
+      {/* Files that go to Odoo as attachments (never stored by QuotePilot) */}
+      <Card className="border-[#374151]/40">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Files for the Odoo quotation</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-muted-foreground">
+            These are attached to the quotation when it is created. QuotePilot does not keep the
+            files, so if you reopened this quote on another day, add them again here.
+          </p>
+          {filesToAttach.length ? (
+            <ul className="list-disc space-y-0.5 pl-5">
+              {filesToAttach.map((f) => (
+                <li key={`${f.name}|${f.size}`}>{f.name}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="font-medium text-amber-700 dark:text-amber-400">No files to attach yet.</p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="cursor-pointer rounded-md border border-[#374151] px-3 py-1.5 text-xs font-semibold hover:bg-muted">
+              Add files
+              <input
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  if (picked.length) setExtraFiles((cur) => [...cur, ...picked]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {syncedOrderId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isAttaching}
+                onClick={() => void attachFiles(syncedOrderId)}
+                className="border-[#374151]"
+              >
+                {isAttaching ? "Attaching..." : "Attach to Odoo again"}
+              </Button>
+            ) : null}
+          </div>
+          {attachStatus ? (
+            <div className="text-xs">
+              {attachStatus.error ? (
+                <p className="text-destructive">Files were not attached: {attachStatus.error}</p>
+              ) : (
+                <p className="text-emerald-700 dark:text-emerald-400">
+                  Attached {attachStatus.attached.length} file(s)
+                  {attachStatus.skipped.length
+                    ? `, ${attachStatus.skipped.length} already on the quotation`
+                    : ""}
+                  .
+                </p>
+              )}
+              {attachStatus.failed.length ? (
+                <p className="text-destructive">
+                  Not attached: {attachStatus.failed.map((f) => `${f.name} (${f.error})`).join("; ")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {/* Primary Actions Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">

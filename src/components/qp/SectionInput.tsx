@@ -151,6 +151,8 @@ export type ExtractionResult = {
   rateOverrides?: RateOverrides | undefined;
   /** Unit the rates are shown in (default SF). */
   rateUnit?: RateUnit | undefined;
+  /** The RFQ email text (and quoter notes) the quote was extracted from. Text only; kept so it can be attached to Odoo later. */
+  rfqEmailText?: string | undefined;
 };
 
 export type ModelOption = {
@@ -465,6 +467,7 @@ export function SectionInput({
         pdfHash: pdfHash ?? undefined,
         sourceFile,
         duplicateAction: activeDecision?.action ?? null,
+        rfqEmailText: combinedText || undefined,
       };
       onRun(extraction, uploadedFiles, activeDecision?.action ?? null, poFiles);
     } catch (requestError) {

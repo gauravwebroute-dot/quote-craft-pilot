@@ -175,9 +175,9 @@ export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides
   const chemFilmCharge = chemFilmRequested ? chemFilmCalculated : 0;
 
   // Marking / special packaging required by the customer's document (rates configurable, default 0).
-  const markRate = Number(rc.extras?.partMarkingPerPart) || 0;
+  // Part marking is charged once per quote (routes/price.js), so it adds nothing to the part's own price.
   const partMarkApplied = part.partMark === true;
-  const partMarkCost = partMarkApplied ? round2(markRate) : 0;
+  const partMarkCost = 0;
   const pkgRate = Number(rc.extras?.packagingPerPart) || 0;
   const packagingApplied = Boolean(part.packagingNote);
   const packagingCost = packagingApplied ? round2(pkgRate) : 0;
@@ -186,11 +186,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides
     partMarking: {
       applied: partMarkApplied,
       cost: partMarkCost,
-      text: !partMarkApplied
-        ? "Not required"
-        : markRate > 0
-          ? `+$${partMarkCost.toFixed(2)} per piece`
-          : "Required - rate not set ($0.00)",
+      text: partMarkApplied ? "Required - charged once per quote" : "Not required",
     },
     packaging: {
       applied: packagingApplied,

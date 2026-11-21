@@ -87,12 +87,18 @@ export const DEFAULT_RATE_CARD = {
     noColorLabel: "Color TBD",
   },
 
-  partMarkCostEach: 1.0,
+  // Part marking (laser engraving after coating) is a quote-level charge, never part of a part's price:
+  // the greater of the minimum or the rate times the total quantity of the parts that need marking.
+  // Charged only when at least one part requires marking.
+  partMarking: {
+    minimumCharge: Number(process.env.RATE_PART_MARKING_MINIMUM) || 100.0,
+    ratePerUnit: Number(process.env.RATE_PART_MARKING_PER_UNIT) || 1.0,
+    product: "Part Marking", // Odoo product name
+  },
 
   // Optional add-ons the customer's document can require. Rates are NOT defined yet, so they default
   // to 0 (the requirement is shown on the quote but adds no charge) until set here or via env vars.
   extras: {
-    partMarkingPerPart: Number(process.env.RATE_PART_MARKING) || 0, // $ per piece
     packagingPerPart: Number(process.env.RATE_SPECIAL_PACKAGING) || 0, // $ per piece
     certificateOfConformanceFlat: Number(process.env.RATE_CERT_OF_CONFORMANCE) || 0, // $ per quote
   },

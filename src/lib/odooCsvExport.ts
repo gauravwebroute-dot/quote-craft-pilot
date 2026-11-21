@@ -56,13 +56,10 @@ export function mapQuotePilotToOdooCsv(
 
   const partRows: OdooCsvRow[] = extractedParts.map((part, index) => {
     const priced = pricing?.results?.[index];
-    // Never fall back to a made-up price: that is what produced "$30 = 6 x $5" quotes in Odoo.
-    if (typeof priced?.pricePerUnit !== "number") {
-      throw new Error(
-        `No calculated price for line ${index + 1} - cannot export a CSV with a made-up price.`,
-      );
-    }
-    const unitPrice = priced.pricePerUnit;
+    // No calculated price (for example no area to estimate from): the line is exported at $0 and marked
+    // "Price pending" so it can be priced in Odoo. A price is never invented.
+    const hasPrice = typeof priced?.pricePerUnit === "number";
+    const unitPrice = hasPrice ? (priced!.pricePerUnit as number) : 0;
     const totalArea = Number(part.totalSurfaceAreaSqIn) || 0;
     const rawMasking = Number(part.maskingAreaSqIn) || 0;
     const maskingSqIn = Math.min(rawMasking, totalArea);
@@ -101,6 +98,7 @@ export function mapQuotePilotToOdooCsv(
       areaPerUnitText(effectiveArea, /powder/i.test(workType)),
       workType,
       colorText,
+      ...(hasPrice ? [] : ["Price pending"]),
     ].join("\n");
 
     return {
@@ -133,7 +131,71 @@ export function mapQuotePilotToOdooCsv(
     "Order Lines/Quantity": 1,
   }));
 
-  return [...partRows, ...feeRows];
+  // Part marking: one quote-level line (quantity 1, the charge as the unit price, units in the description).
+  const pm = pricing?.partMarking;
+  const markingRows: OdooCsvRow[] =
+    pm?.required && pm.charge > 0
+      ? [
+          {
+            Customer: customer,
+            Tags: ODOO_TEMP_TAG,
+            "Customer Reference": quoteNumber || "",
+            "Order Lines/Products": pm.product,
+            "Order Lines/Description": `${pm.product} \u2013 ${pm.units} unit${pm.units === 1 ? "" : "s"}`,
+            "Order Lines/x_rev": "",
+            "Order Lines/x_sq_in": "",
+            "Order Lines/x_work_type": "",
+            "Order Lines/x_price_si": "",
+            "Order Lines/Unit Price": Number(pm.charge.toFixed(2)),
+            "Order Lines/Quantity": 1,
+          },
+        ]
+      : [];
+
+  return [...partRows, ...feeRows, ...markingRows];
+}
+
+/** One order line for "Sync to Odoo". Part lines carry no product (name only); fee lines name an Odoo product. */
+export interface OdooSyncLine {
+  kind: "part" | "fee";
+  product: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  rev: string;
+  sqIn: number | null;
+  workType: string;
+  priceSi: number | null;
+}
+
+/** The same lines as the CSV export, so a synced quotation matches an imported one exactly. */
+export function buildOdooSyncLines(
+  extractedParts: ExtractionPart[],
+  pricing: PricingResponse | null | undefined,
+  customerName?: string | null,
+  quoteNumber?: string | null,
+): OdooSyncLine[] {
+  const rows = mapQuotePilotToOdooCsv(extractedParts, customerName, pricing, quoteNumber);
+  const num = (v: number | string) => (v === "" || v === null || v === undefined ? null : Number(v));
+  return rows.map((row, i) => ({
+    kind: i < extractedParts.length ? "part" : "fee",
+    product: row["Order Lines/Products"],
+    description: row["Order Lines/Description"],
+    quantity: row["Order Lines/Quantity"],
+    unitPrice: Number(row["Order Lines/Unit Price"]) || 0,
+    rev: row["Order Lines/x_rev"],
+    sqIn: num(row["Order Lines/x_sq_in"]),
+    workType: row["Order Lines/x_work_type"],
+    priceSi: num(row["Order Lines/x_price_si"]),
+  }));
+}
+
+/** Prices the parts exactly as the CSV export does (used by Sync to Odoo when no priced result is at hand). */
+export async function priceForOdoo(
+  parts: ExtractionPart[],
+  rateOverrides?: RateOverrides,
+): Promise<PricingResponse> {
+  return fetchPricing(parts, rateOverrides);
 }
 
 function escapeCsvCell(value: unknown): string {

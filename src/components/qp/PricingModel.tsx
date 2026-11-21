@@ -48,6 +48,7 @@ export type PartPatch = Partial<
     | "bentFactorOverride"
     | "priceSourceManual"
     | "rateOverride"
+    | "partMark"
     | "sowFlatAreaSqIn"
     | "areaSource"
     | "estimationMethod"

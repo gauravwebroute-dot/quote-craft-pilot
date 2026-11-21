@@ -42,6 +42,8 @@ import {
  *   used by /api/odoo/cross-check and the pricing engine)
  * @param {object} [params.formPayload] - complete form state JSON for bidirectional rehydration (REQ-006)
  * @param {string} [params.businessUnit] - Target company / Business Unit
+ * @param {Array<object>} [params.orderLines] - the quotation lines exactly as the CSV export builds them
+ *   (part lines, lot fee lines, part marking line). When absent the legacy per-part lines are built.
  * @param {boolean} params.confirm - MUST be exactly `true`. This is the
  *   caller's explicit "yes, write this" signal.
  */
@@ -50,6 +52,7 @@ export async function createOdooQuotation({
   parts = [],
   formPayload = null,
   businessUnit = "",
+  orderLines = null,
   confirm,
 }) {
   if (confirm !== true) {
@@ -80,6 +83,7 @@ export async function createOdooQuotation({
       skipped,
       formPayload,
       businessUnit: targetBu,
+      orderLines,
     });
   }
 
@@ -90,10 +94,11 @@ export async function createOdooQuotation({
     skipped,
     formPayload,
     businessUnit: targetBu,
+    orderLines,
   });
 }
 
-function createDummyQuotation({ customer, toCreate, skipped, formPayload, businessUnit }) {
+function createDummyQuotation({ customer, toCreate, skipped, formPayload, businessUnit, orderLines }) {
   const fakeOrderNum = Math.floor(Math.random() * 900) + 42;
   const saleOrderName = `S000${fakeOrderNum}`.slice(0, 6);
   const fakeOrderId = 1000 + fakeOrderNum;
@@ -106,10 +111,12 @@ function createDummyQuotation({ customer, toCreate, skipped, formPayload, busine
       company: companyName,
       tag: TEST_TAG_NAME,
       partnerCreated: false,
-      lineCount: toCreate.length,
+      lineCount: Array.isArray(orderLines) && orderLines.length ? orderLines.length : toCreate.length,
       partNumbers: toCreate.map((p) => p.partNumber),
       formPayload: formPayload || { customer, parts: toCreate.map((p) => p.original) },
-      descriptions: toCreate.map((p) => {
+      descriptions: Array.isArray(orderLines) && orderLines.length
+        ? orderLines.map((l) => l.description)
+        : toCreate.map((p) => {
         const areaSqIn = p.original?.totalSurfaceAreaSqIn;
         return `${p.original?.partName ?? p.partNumber ?? "Part"} -- ${
           typeof areaSqIn === "number" ? areaSqIn : "area unknown"
@@ -130,6 +137,7 @@ async function createLiveQuotation({
   skipped,
   formPayload,
   businessUnit,
+  orderLines,
 }) {
   const uid = await odooAuth();
   const companyId = freshCheck.company?.id || (await resolveTestCompanyId(uid, businessUnit));
@@ -182,64 +190,69 @@ async function createLiveQuotation({
     }),
   ].join("\n");
 
-  // Build custom and standard order lines per PRD v3.0 Section 5.1
-  const orderLinesWithCustomFields = toCreate.map((p) => {
-    const computed = p.computedPrice?.priced !== false ? p.computedPrice : null;
-    const areaSqIn = Number(p.original?.totalSurfaceAreaSqIn || 0);
-    const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
-    const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
-    const rev = p.original?.revision || "";
-    const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
-      areaSqIn > 0 ? areaSqIn : "area unknown"
-    } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
-    const pricePerSi = Number(p.original?.pricePerSi || 0.4);
-    const reuse = reusedUnitPrice(p.original);
-    const unitPrice =
-      reuse ??
-      computed?.pricePerUnit ??
-      (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
+  // Order lines. When the app sends `orderLines` (the same lines as the CSV export) those are used: part
+  // lines by name, fee lines (lot fees, part marking) on their Odoo product. Otherwise the legacy per-part
+  // lines are built (used by "add one part to Odoo").
+  const warnings = [];
+  const productCache = new Map();
+  const lineSpecs = [];
 
-    return [
-      0,
-      0,
-      {
-        name: description,
-        product_uom_qty: p.original?.quantity ?? 1,
-        price_unit: unitPrice,
-        x_rev: p.original?.revision || false,
-        x_work_type: workType,
-        [FIELD_SQ_IN]: areaSqIn,
-        [FIELD_PRICE_SI]: pricePerSi,
-      },
-    ];
-  });
+  if (Array.isArray(orderLines) && orderLines.length > 0) {
+    for (const l of orderLines) {
+      const qty = Number(l.quantity) > 0 ? Number(l.quantity) : 1;
+      const price = Number(l.unitPrice) || 0;
+      const spec = {
+        base: { name: String(l.description || l.product || "Line"), product_uom_qty: qty, price_unit: price },
+        custom:
+          l.kind === "part"
+            ? {
+                x_rev: l.rev || false,
+                x_work_type: l.workType || false,
+                [FIELD_SQ_IN]: Number(l.sqIn) || 0,
+                [FIELD_PRICE_SI]: Number(l.priceSi) || 0,
+              }
+            : {},
+      };
+      if (l.kind === "fee" && l.product) {
+        if (!productCache.has(l.product)) {
+          productCache.set(l.product, await ensureServiceProduct(uid, l.product, warnings));
+        }
+        const productId = productCache.get(l.product);
+        if (productId) spec.base.product_id = productId;
+      }
+      lineSpecs.push(spec);
+    }
+  } else {
+    for (const p of toCreate) {
+      const computed = p.computedPrice?.priced !== false ? p.computedPrice : null;
+      const areaSqIn = Number(p.original?.totalSurfaceAreaSqIn || 0);
+      const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
+      const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
+      const rev = p.original?.revision || "";
+      // No made-up price: when nothing is available the line goes in at $0 and is marked "Price pending".
+      const unitPrice = reusedUnitPrice(p.original) ?? computed?.pricePerUnit ?? 0;
+      const pricePending = !(unitPrice > 0);
+      const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
+        areaSqIn > 0 ? areaSqIn : "area unknown"
+      } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType}${pricePending ? " | Price pending" : ""} ${TEST_TAG_NAME}`;
+      lineSpecs.push({
+        base: {
+          name: description,
+          product_uom_qty: p.original?.quantity ?? 1,
+          price_unit: unitPrice,
+        },
+        custom: {
+          x_rev: p.original?.revision || false,
+          x_work_type: workType,
+          [FIELD_SQ_IN]: areaSqIn,
+          [FIELD_PRICE_SI]: Number(p.original?.pricePerSi || 0),
+        },
+      });
+    }
+  }
 
-  const orderLinesStandardOnly = toCreate.map((p) => {
-    const computed = p.computedPrice?.priced !== false ? p.computedPrice : null;
-    const areaSqIn = Number(p.original?.totalSurfaceAreaSqIn || 0);
-    const maskSqIn = Number(p.original?.maskingAreaSqIn || 0);
-    const workType = p.original?.coatingBom?.topcoat || p.original?.workType || "Coating";
-    const rev = p.original?.revision || "";
-    const description = `${p.partNumber ? `${p.partNumber} - ` : ""}${p.original?.partName ?? p.partNumber ?? "Part"}${rev ? ` [Rev: ${rev}]` : ""} -- ${
-      areaSqIn > 0 ? areaSqIn : "area unknown"
-    } si${maskSqIn > 0 ? ` (mask: ${maskSqIn} si)` : ""} | ${workType} ${TEST_TAG_NAME}`;
-    const pricePerSi = Number(p.original?.pricePerSi || 0.4);
-    const reuse = reusedUnitPrice(p.original);
-    const unitPrice =
-      reuse ??
-      computed?.pricePerUnit ??
-      (areaSqIn > 0 ? Number((areaSqIn * pricePerSi).toFixed(2)) : 5.0);
-
-    return [
-      0,
-      0,
-      {
-        name: description,
-        product_uom_qty: p.original?.quantity ?? 1,
-        price_unit: unitPrice,
-      },
-    ];
-  });
+  const orderLinesWithCustomFields = lineSpecs.map((l) => [0, 0, { ...l.base, ...l.custom }]);
+  const orderLinesStandardOnly = lineSpecs.map((l) => [0, 0, { ...l.base }]);
 
   const baseValues = {
     partner_id: partnerId,
@@ -313,8 +326,9 @@ async function createLiveQuotation({
     tag: TEST_TAG_NAME,
     partnerId,
     partnerCreated,
-    lineCount: toCreate.length,
+    lineCount: lineSpecs.length,
     partNumbers: toCreate.map((p) => p.partNumber),
+    warnings,
   };
 
   auditLog("LIVE_CREATE", customer, created, skipped);
@@ -336,6 +350,105 @@ function auditLog(kind, customer, created, skipped) {
 }
 
 export class SafetyError extends Error {}
+
+const odooArgs = (uid, model, method, args, kwargs) => [
+  process.env.ODOO_DB,
+  uid,
+  process.env.ODOO_API_KEY,
+  model,
+  method,
+  args,
+  ...(kwargs ? [kwargs] : []),
+];
+
+/**
+ * Finds the Odoo service product with this exact name, or creates it (a NEW record, shared across
+ * companies, price $0, sellable). Returns the product.product id, or null (with a warning) if neither works.
+ */
+async function ensureServiceProduct(uid, name, warnings) {
+  try {
+    const [found] = await odooCall("object", "execute_kw", odooArgs(uid, "product.product", "search", [[["name", "=", name]]], { limit: 1 }));
+    if (found) return found;
+    const templateId = await odooCall(
+      "object",
+      "execute_kw",
+      odooArgs(uid, "product.template", "create", [
+        { name, type: "service", list_price: 0, sale_ok: true, purchase_ok: false, company_id: false },
+      ]),
+    );
+    const [variantId] = await odooCall(
+      "object",
+      "execute_kw",
+      odooArgs(uid, "product.product", "search", [[["product_tmpl_id", "=", templateId]]], { limit: 1 }),
+    );
+    if (variantId) {
+      console.log(`[odoo-write][PRODUCT_CREATED] ${name} (product.product ${variantId})`);
+      return variantId;
+    }
+    warnings.push(`Product "${name}" was created in Odoo but could not be found; the line was added by name only.`);
+  } catch (err) {
+    warnings.push(`Could not find or create the Odoo product "${name}" (${err.message}); the line was added by name only.`);
+  }
+  return null;
+}
+
+/**
+ * Attaches files to a sales order (create only, never overwrites). A file whose name and size already
+ * match an attachment on the order is skipped, so repeating a sync does not duplicate files.
+ * @param {{ saleOrderId: number, files: Array<{ originalname: string, mimetype?: string, buffer: Buffer }> }} params
+ */
+export async function attachFilesToSaleOrder({ saleOrderId, files = [] }) {
+  const id = Number(saleOrderId);
+  if (!Number.isInteger(id) || id <= 0) throw new SafetyError("A valid saleOrderId is required to attach files.");
+  if (!files.length) return { mode: isLiveConfigured() ? "live" : "dummy", attached: [], skipped: [], failed: [] };
+
+  if (!isLiveConfigured()) {
+    return { mode: "dummy", attached: files.map((f) => f.originalname), skipped: [], failed: [] };
+  }
+
+  const uid = await odooAuth();
+  const existing = await odooCall(
+    "object",
+    "execute_kw",
+    odooArgs(uid, "ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["res_id", "=", id]]], {
+      fields: ["name", "file_size"],
+    }),
+  );
+  const have = new Set((existing ?? []).map((a) => `${a.name}|${a.file_size}`));
+
+  const attached = [];
+  const skipped = [];
+  const failed = [];
+  for (const f of files) {
+    const name = f.originalname;
+    if (have.has(`${name}|${f.buffer.length}`)) {
+      skipped.push(name);
+      continue;
+    }
+    try {
+      await odooCall(
+        "object",
+        "execute_kw",
+        odooArgs(uid, "ir.attachment", "create", [
+          {
+            name,
+            datas: f.buffer.toString("base64"),
+            res_model: "sale.order",
+            res_id: id,
+            type: "binary",
+            mimetype: f.mimetype || "application/octet-stream",
+          },
+        ]),
+      );
+      attached.push(name);
+      have.add(`${name}|${f.buffer.length}`);
+    } catch (err) {
+      failed.push({ name, error: err.message });
+    }
+  }
+  console.log(`[odoo-write][ATTACH] saleOrder=${id} attached=${JSON.stringify(attached)} skipped=${JSON.stringify(skipped)} failed=${JSON.stringify(failed.map((x) => x.name))}`);
+  return { mode: "live", attached, skipped, failed };
+}
 
 // The operator can choose to reuse the last confirmed price for a customer + part; it then wins over
 // the QuotePilot estimate everywhere (pricing engine, CSV and Odoo sync).

@@ -1,9 +1,13 @@
 import { Router } from "express";
 import { crossCheckOdoo, listCompanies } from "../services/odooCrossCheck.js";
 import { defaultQuoteStore } from "../lib/quoteStore.js";
-import { createOdooQuotation, SafetyError } from "../services/odooCreateQuotation.js";
+import multer from "multer";
+import { createOdooQuotation, attachFilesToSaleOrder, SafetyError } from "../services/odooCreateQuotation.js";
 
 const router = Router();
+
+// Files for an Odoo quotation are held in memory only for the request and are never stored by QuotePilot.
+const attachmentUpload = multer({ storage: multer.memoryStorage() });
 
 router.post("/odoo/cross-check", async (req, res) => {
   try {
@@ -69,7 +73,7 @@ async function labelPriorQuoteSources(result) {
 // for the full safety contract this endpoint follows.
 router.post("/odoo/create-quotation", async (req, res) => {
   try {
-    const { customer, parts, formPayload, businessUnit, confirm } = req.body ?? {};
+    const { customer, parts, formPayload, businessUnit, confirm, orderLines } = req.body ?? {};
     if (!customer || !Array.isArray(parts)) {
       return res.status(400).json({
         error: "BAD_REQUEST",
@@ -81,6 +85,7 @@ router.post("/odoo/create-quotation", async (req, res) => {
       parts,
       formPayload,
       businessUnit,
+      orderLines,
       confirm,
     });
     return res.json(result);
@@ -92,6 +97,25 @@ router.post("/odoo/create-quotation", async (req, res) => {
     return res.status(502).json({
       error: "ODOO_CREATE_FAILED",
       message: error instanceof Error ? error.message : "Odoo quotation creation failed.",
+    });
+  }
+});
+
+router.post("/odoo/attachments", attachmentUpload.array("files"), async (req, res) => {
+  try {
+    const result = await attachFilesToSaleOrder({
+      saleOrderId: req.body?.saleOrderId,
+      files: req.files ?? [],
+    });
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof SafetyError) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: error.message });
+    }
+    console.error("[POST /api/odoo/attachments] failed:", error);
+    return res.status(502).json({
+      error: "ODOO_ATTACH_FAILED",
+      message: error instanceof Error ? error.message : "Attaching files to Odoo failed.",
     });
   }
 });
