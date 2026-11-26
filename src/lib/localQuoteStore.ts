@@ -41,17 +41,34 @@ export function advanceLocalSequence(): string {
   return nextSeq;
 }
 
-/** Clears every locally stored quote and restarts numbering at QPyy-0001. */
-export function resetLocalQuoteData(): string {
-  const first = `QP${getCurrentYear()}-0001`;
-  if (typeof window === "undefined") return first;
+/**
+ * Clears the locally stored quotes of ONE company. Other companies' quotes stay. The number is one
+ * sequence shared by all companies, so the next number is the highest one still stored + 1
+ * (QPyy-0001 only when no quote of any company is left). Returns the next number.
+ */
+export function resetLocalQuoteData(businessUnit: string): string {
+  const year = getCurrentYear();
+  const first = `QP${year}-0001`;
+  if (typeof window === "undefined" || !businessUnit) return first;
   try {
-    localStorage.removeItem(STORAGE_KEY_QUOTES);
-    localStorage.setItem(STORAGE_KEY_SEQ, first);
+    const kept = getLocalQuotes().filter((q) => q.businessUnit !== businessUnit);
+    if (kept.length === 0) {
+      localStorage.removeItem(STORAGE_KEY_QUOTES);
+    } else {
+      localStorage.setItem(STORAGE_KEY_QUOTES, JSON.stringify(kept));
+    }
+    let maxNum = 0;
+    for (const q of kept) {
+      const m = /^QP(\d{2})-(\d+)$/.exec(q.draftSequenceId || "");
+      if (m && m[1] === year) maxNum = Math.max(maxNum, Number(m[2]));
+    }
+    const next = `QP${year}-${String(maxNum + 1).padStart(4, "0")}`;
+    localStorage.setItem(STORAGE_KEY_SEQ, next);
+    return next;
   } catch {
     // storage unavailable - nothing to clear
+    return first;
   }
-  return first;
 }
 
 export function setLocalSequence(seq: string): void {

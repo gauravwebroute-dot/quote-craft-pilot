@@ -100,23 +100,72 @@ export function createQuoteStore({
     return (await findDuplicateQuotes(pdfHash, businessUnit))[0] ?? null;
   }
 
-  // Wipes ALL quotes (line items + revisions cascade) and resets the counter so the
-  // next quote is QPyy-0001. Only touches this app's own database (never Odoo).
-  async function resetAllQuotes() {
-    const { count } = await sb.from("quotes").select("*", { count: "exact", head: true });
+  // Wipes every quote of ONE company (line items + revisions too). Other companies are never
+  // touched. The quote number (QPyy-nnnn) is one sequence shared by all companies, so the counter
+  // is moved back to the highest number still in use (per affected year), and it only returns to
+  // 0001 when no company has any quote left. Only touches this app's own database (never Odoo).
+  async function resetCompanyQuotes(businessUnit) {
+    const bu = String(businessUnit ?? "").trim();
+    if (!bu) throw new Error("[quoteStore:resetCompany] businessUnit is required");
+
+    const doomed = must(
+      await sb.from("quotes").select("id, draft_sequence_id").eq("business_unit", bu),
+      "resetCompany:select",
+    );
+    const ids = doomed.map((r) => r.id);
+    const affectedYears = new Set();
+    for (const r of doomed) {
+      const m = /^QP(\d{2})-\d+$/.exec(String(r.draft_sequence_id ?? ""));
+      if (m) affectedYears.add(m[1]);
+    }
+
     // Children first (works even when the foreign keys are not ON DELETE CASCADE).
-    must(await sb.from("quote_line_items").delete().gte("quote_id", 0), "resetAll:lineItems");
-    must(await sb.from("quote_revisions").delete().gte("quote_id", 0), "resetAll:revisions");
-    must(await sb.from("quotes").delete().gte("id", 0), "resetAll:quotes");
-    must(await sb.from("quote_counters").delete().neq("year", ""), "resetAll:counters");
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      must(await sb.from("quote_line_items").delete().in("quote_id", chunk), "resetCompany:lineItems");
+      must(await sb.from("quote_revisions").delete().in("quote_id", chunk), "resetCompany:revisions");
+    }
+    must(await sb.from("quotes").delete().eq("business_unit", bu), "resetCompany:quotes");
+
     // Row-level security can make a delete "succeed" while removing nothing - verify.
-    const { count: left } = await sb.from("quotes").select("*", { count: "exact", head: true });
+    const { count: left } = await sb
+      .from("quotes")
+      .select("*", { count: "exact", head: true })
+      .eq("business_unit", bu);
     if (left) {
       throw new Error(
-        `[quoteStore:resetAll] ${left} quote(s) are still in the database after delete. The Supabase key probably lacks DELETE permission (row-level security) - use the service_role key or add a delete policy.`,
+        `[quoteStore:resetCompany] ${left} quote(s) of "${bu}" are still in the database after delete. The Supabase key probably lacks DELETE permission (row-level security) - use the service_role key or add a delete policy.`,
       );
     }
-    return { deletedQuotes: count || 0, nextDraftSequenceId: await getCurrentDraftSequenceId() };
+
+    // Counters: highest number still used by ANY company, for each year that lost quotes.
+    const remaining = must(await sb.from("quotes").select("draft_sequence_id"), "resetCompany:remaining");
+    if (remaining.length === 0) {
+      must(await sb.from("quote_counters").delete().neq("year", ""), "resetCompany:counters");
+    } else {
+      const maxByYear = new Map();
+      for (const r of remaining) {
+        const m = /^QP(\d{2})-(\d+)$/.exec(String(r.draft_sequence_id ?? ""));
+        if (!m) continue;
+        maxByYear.set(m[1], Math.max(maxByYear.get(m[1]) || 0, Number(m[2])));
+      }
+      for (const year of affectedYears) {
+        const max = maxByYear.get(year) || 0;
+        if (max === 0) {
+          must(await sb.from("quote_counters").delete().eq("year", year), "resetCompany:counterDelete");
+        } else {
+          must(
+            await sb.from("quote_counters").update({ last_sequence: max }).eq("year", year),
+            "resetCompany:counterUpdate",
+          );
+        }
+      }
+    }
+    return {
+      deletedQuotes: ids.length,
+      businessUnit: bu,
+      nextDraftSequenceId: await getCurrentDraftSequenceId(),
+    };
   }
 
   async function recordRevision({ quoteId, payload, revisionLabel }) {
@@ -477,7 +526,7 @@ export function createQuoteStore({
     advanceSequenceCounter,
     findDuplicateQuote,
     findDuplicateQuotes,
-    resetAllQuotes,
+    resetCompanyQuotes,
     recordQuote,
     updateQuoteStatus,
     getHistory,

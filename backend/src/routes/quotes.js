@@ -301,8 +301,9 @@ router.get("/quotes/db-status", async (_req, res) => {
   }
 });
 
-// Reset: wipes every saved quote in the app database and restarts numbering at QPyy-0001.
-// Requires the exact confirmation phrase. Never touches Odoo.
+// Reset: wipes every saved quote of ONE company in the app database. The shared quote number
+// goes back to the highest number still used (0001 only when no company has quotes left).
+// Requires the exact confirmation phrase and the company name. Never touches Odoo.
 router.post("/quotes/reset", async (req, res) => {
   try {
     if (process.env.ALLOW_QUOTE_RESET === "false") {
@@ -313,10 +314,17 @@ router.post("/quotes/reset", async (req, res) => {
     if (req.body?.confirm !== "RESET") {
       return res.status(400).json({
         error: "CONFIRMATION_REQUIRED",
-        message: 'Send confirm: "RESET" to wipe all quotes.',
+        message: 'Send confirm: "RESET" to wipe the quotes of one company.',
       });
     }
-    const result = await defaultQuoteStore.resetAllQuotes();
+    const businessUnit = String(req.body?.businessUnit ?? "").trim();
+    if (!businessUnit) {
+      return res.status(400).json({
+        error: "BUSINESS_UNIT_REQUIRED",
+        message: "Send businessUnit: <company> so only that company's quotes are reset.",
+      });
+    }
+    const result = await defaultQuoteStore.resetCompanyQuotes(businessUnit);
     return res.json({ success: true, ...result });
   } catch (error) {
     console.error("[POST /api/quotes/reset] failed:", error);

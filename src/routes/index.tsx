@@ -141,13 +141,14 @@ function QuotePilot() {
     setFocusedSection("overview");
   };
 
-  // Reset: wipes every saved quote in the database + this browser and restarts at QPyy-0001
+  // Reset: wipes the saved quotes of the SELECTED company only (database + this browser).
+  // Numbering continues after the highest number still used by any company.
   const handleResetNumbering = async () => {
     try {
       const response = await fetch(`${apiUrl()}/api/quotes/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm: "RESET" }),
+        body: JSON.stringify({ confirm: "RESET", businessUnit }),
       });
       if (!response.ok) {
         // Surface the server's real reason (disabled, database permission, unreachable...) instead of a generic message.
@@ -161,7 +162,7 @@ function QuotePilot() {
         throw new Error(reason);
       }
       const data = await response.json();
-      const first = resetLocalQuoteData();
+      const first = resetLocalQuoteData(businessUnit);
       const next = data?.nextDraftSequenceId || first;
       setLocalSequence(next);
       setDraftSequenceId(next);
@@ -207,6 +208,7 @@ function QuotePilot() {
         onSaveDraft={handleSaveDraft}
         onResetNumbering={handleResetNumbering}
         quoteNumber={activeQuoteNumber}
+        businessUnit={businessUnit}
       />
 
       <QuoteHistoryDialog
