@@ -238,21 +238,62 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     return findDuplicateQuotesByHash(pdfHash, businessUnit)[0] ?? null;
   }
 
-  // Wipes ALL quotes, line items, revisions and resets the sequence counter so the
-  // next quote is QPyy-0001. Only touches this app's own database (never Odoo).
-  function resetAllQuotes() {
-    const count = Number(db.prepare("SELECT COUNT(*) AS c FROM quotes").get()?.c || 0);
+  // Wipes every quote of ONE company (line items + revisions too). Other companies are never
+  // touched. The quote number is one sequence shared by all companies, so the counter moves back
+  // to the highest number still in use (per affected year) and only returns to 0001 when no
+  // company has any quote left. Only touches this app's own database (never Odoo).
+  function resetCompanyQuotes(businessUnit) {
+    const bu = String(businessUnit ?? "").trim();
+    if (!bu) throw new Error("[quoteStore:resetCompany] businessUnit is required");
+
+    const doomed = db
+      .prepare("SELECT id, draft_sequence_id FROM quotes WHERE business_unit = ?")
+      .all(bu);
+    const affectedYears = new Set();
+    for (const r of doomed) {
+      const m = /^QP(\d{2})-\d+$/.exec(String(r.draft_sequence_id ?? ""));
+      if (m) affectedYears.add(m[1]);
+    }
+
     db.exec("BEGIN");
     try {
-      db.exec(
-        "DELETE FROM quote_line_items; DELETE FROM quote_revisions; DELETE FROM quotes; DELETE FROM quote_counters;",
-      );
+      db.prepare(
+        "DELETE FROM quote_line_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_unit = ?)",
+      ).run(bu);
+      db.prepare(
+        "DELETE FROM quote_revisions WHERE quote_id IN (SELECT id FROM quotes WHERE business_unit = ?)",
+      ).run(bu);
+      db.prepare("DELETE FROM quotes WHERE business_unit = ?").run(bu);
+
+      const remaining = db.prepare("SELECT draft_sequence_id FROM quotes").all();
+      if (remaining.length === 0) {
+        db.exec("DELETE FROM quote_counters");
+      } else {
+        const maxByYear = new Map();
+        for (const r of remaining) {
+          const m = /^QP(\d{2})-(\d+)$/.exec(String(r.draft_sequence_id ?? ""));
+          if (!m) continue;
+          maxByYear.set(m[1], Math.max(maxByYear.get(m[1]) || 0, Number(m[2])));
+        }
+        for (const year of affectedYears) {
+          const max = maxByYear.get(year) || 0;
+          if (max === 0) {
+            db.prepare("DELETE FROM quote_counters WHERE year = ?").run(year);
+          } else {
+            db.prepare("UPDATE quote_counters SET last_sequence = ? WHERE year = ?").run(max, year);
+          }
+        }
+      }
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");
       throw err;
     }
-    return { deletedQuotes: count, nextDraftSequenceId: getCurrentDraftSequenceId() };
+    return {
+      deletedQuotes: doomed.length,
+      businessUnit: bu,
+      nextDraftSequenceId: getCurrentDraftSequenceId(),
+    };
   }
 
   function recordRevision({ quoteId, payload, revisionLabel }) {
@@ -749,7 +790,7 @@ export function createQuoteStore(dbPath = DEFAULT_DB_PATH) {
     advanceSequenceCounter,
     findDuplicateQuote: findDuplicateQuoteByHash,
     findDuplicateQuotes: findDuplicateQuotesByHash,
-    resetAllQuotes,
+    resetCompanyQuotes,
     recordQuote,
     updateQuoteStatus,
     getHistory,

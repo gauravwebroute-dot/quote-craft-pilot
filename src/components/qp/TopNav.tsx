@@ -21,8 +21,10 @@ export function TopNav({
   onSaveDraft,
   onResetNumbering,
   quoteNumber,
+  businessUnit,
 }: {
   onResetNumbering?: () => void | Promise<void>;
+  businessUnit?: string;
   onOpenHistory?: () => void;
   onNewQuote?: () => void;
   onSaveDraft?: () => void;
@@ -70,16 +72,21 @@ export function TopNav({
                   size="sm"
                   className="gap-1.5 text-xs text-destructive hover:text-destructive"
                 >
-                  <RotateCcw className="size-3.5" /> Reset to 0001
+                  <RotateCcw className="size-3.5" /> Reset quotes
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Reset all quotes and restart at QP-0001?</AlertDialogTitle>
+                  <AlertDialogTitle>
+                    Reset all quotes of {businessUnit || "this company"}?
+                  </AlertDialogTitle>
                   <AlertDialogDescription>
-                    This permanently deletes every saved quote, revision and draft from QuotePilot
-                    (database and this browser) and the next quote becomes number 0001. It does NOT
-                    delete anything in Odoo. Type <strong>RESET</strong> to confirm.
+                    This permanently deletes every saved quote, revision and draft of{" "}
+                    <strong>{businessUnit || "this company"}</strong> from QuotePilot (database and
+                    this browser). Quotes of the other companies are not touched. Numbering
+                    continues after the highest number still used by any company, and restarts at
+                    0001 only when no company has a quote left. It does NOT delete anything in
+                    Odoo. Type <strong>RESET</strong> to confirm.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <Input
@@ -95,7 +102,7 @@ export function TopNav({
                     onClick={() => void onResetNumbering()}
                     className="bg-destructive text-white hover:bg-destructive/90"
                   >
-                    Delete all and reset
+                    Delete {businessUnit || "company"} quotes
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
