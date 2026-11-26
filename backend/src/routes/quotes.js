@@ -332,9 +332,23 @@ router.post("/quotes/reset", async (req, res) => {
 router.delete("/quotes/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const businessUnit = String(req.query?.businessUnit ?? "").trim() || null;
+    const businessUnit = String(req.query?.businessUnit ?? "").trim();
+    // A delete must always name the company, so it can never remove another company's quote.
+    if (!businessUnit) {
+      return res.status(400).json({
+        error: "BUSINESS_UNIT_REQUIRED",
+        message: "Send ?businessUnit=<company> to delete a quote.",
+      });
+    }
     const deleted = await defaultQuoteStore.deleteQuote(id, businessUnit);
-    return res.json({ success: deleted });
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: "QUOTE_NOT_FOUND",
+        message: "No quote with this number exists for this company.",
+      });
+    }
+    return res.json({ success: true });
   } catch (error) {
     console.error("[DELETE /api/quotes/:id] failed:", error);
     return res

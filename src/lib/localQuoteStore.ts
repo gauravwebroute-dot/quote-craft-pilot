@@ -124,6 +124,25 @@ export function saveLocalQuote(
   return fullRecord;
 }
 
+/**
+ * Removes exactly one locally stored quote. It must match BOTH the draft number and the
+ * business unit, so a quote that belongs to another company is never removed.
+ */
+export function deleteLocalQuote(draftSequenceId: string, businessUnit: string): boolean {
+  if (typeof window === "undefined" || !draftSequenceId || !businessUnit) return false;
+  try {
+    const quotes = getLocalQuotes();
+    const kept = quotes.filter(
+      (q) => !(q.draftSequenceId === draftSequenceId && q.businessUnit === businessUnit),
+    );
+    if (kept.length === quotes.length) return false;
+    localStorage.setItem(STORAGE_KEY_QUOTES, JSON.stringify(kept));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function searchLocalQuotes(
   query = "",
   businessUnit = "all",
