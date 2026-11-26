@@ -31,7 +31,7 @@ import {
 import type { ExtractionResult } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
 import { useBusinessUnits } from "@/lib/businessUnits";
-import { searchLocalQuotes, getLocalQuotes } from "@/lib/localQuoteStore";
+import { searchLocalQuotes, getLocalQuotes, deleteLocalQuote } from "@/lib/localQuoteStore";
 
 export type QuoteRecord = {
   id: number;
@@ -186,19 +186,39 @@ export function QuoteHistoryDialog({
     }
   };
 
-  const handleDelete = async (quoteId: number, businessUnit?: string) => {
-    if (!confirm("Are you sure you want to delete this quote record?")) return;
+  // Deletes ONE quote of ONE company. The row shown here can be the browser copy, whose
+  // numeric id is not the database id, so the quote is addressed by its draft number plus
+  // its business unit (never by the numeric id).
+  const handleDelete = async (quote: QuoteRecord) => {
+    const { draftSequenceId, businessUnit } = quote;
+    if (!draftSequenceId || !businessUnit) {
+      setActionMessage("Cannot delete: this quote has no company recorded.");
+      return;
+    }
+    if (
+      !confirm(
+        `Delete quote ${draftSequenceId} (${businessUnit})? Quotes of other companies are not affected.`,
+      )
+    )
+      return;
     try {
-      const buQuery = businessUnit ? `?businessUnit=${encodeURIComponent(businessUnit)}` : "";
-      const response = await fetch(`${apiUrl()}/api/quotes/${quoteId}${buQuery}`, {
-        method: "DELETE",
-      });
-      if (response.ok) {
-        setQuotes((prev) => prev.filter((q) => q.id !== quoteId));
-        setActionMessage("Quote deleted successfully.");
+      const response = await fetch(
+        `${apiUrl()}/api/quotes/${encodeURIComponent(draftSequenceId)}?businessUnit=${encodeURIComponent(businessUnit)}`,
+        { method: "DELETE" },
+      );
+      // 404 = the server has no such quote for this company (it only exists in this browser).
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`Server responded ${response.status}.`);
       }
+      deleteLocalQuote(draftSequenceId, businessUnit);
+      setQuotes((prev) =>
+        prev.filter((q) => !(q.draftSequenceId === draftSequenceId && q.businessUnit === businessUnit)),
+      );
+      setActionMessage(`Quote ${draftSequenceId} (${businessUnit}) deleted.`);
     } catch (err) {
-      setActionMessage("Could not delete quote.");
+      setActionMessage(
+        `Could not delete quote ${draftSequenceId}. ${err instanceof Error ? err.message : ""}`.trim(),
+      );
     }
   };
 
@@ -398,7 +418,7 @@ export function QuoteHistoryDialog({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(quote.id, quote.businessUnit)}
+                            onClick={() => handleDelete(quote)}
                             className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10"
                             title="Delete Quote"
                           >
