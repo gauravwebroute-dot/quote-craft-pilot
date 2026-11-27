@@ -369,11 +369,20 @@ async function ensureServiceProduct(uid, name, warnings) {
   try {
     const [found] = await odooCall("object", "execute_kw", odooArgs(uid, "product.product", "search", [[["name", "=", name]]], { limit: 1 }));
     if (found) return found;
+    const categId = await resolveProductCategoryId(uid, warnings);
     const templateId = await odooCall(
       "object",
       "execute_kw",
       odooArgs(uid, "product.template", "create", [
-        { name, type: "service", list_price: 0, sale_ok: true, purchase_ok: false, company_id: false },
+        {
+          name,
+          type: "service",
+          list_price: 0,
+          sale_ok: true,
+          purchase_ok: false,
+          company_id: false,
+          ...(categId ? { categ_id: categId } : {}),
+        },
       ]),
     );
     const [variantId] = await odooCall(
@@ -390,6 +399,26 @@ async function ensureServiceProduct(uid, name, warnings) {
     warnings.push(`Could not find or create the Odoo product "${name}" (${err.message}); the line was added by name only.`);
   }
   return null;
+}
+
+let contentFieldCache = null;
+/**
+ * Odoo 20 removed the "datas" field on ir.attachment: the file content goes in "raw" (base64 text over
+ * RPC). Older versions only accept "datas". Ask Odoo once which one exists.
+ */
+async function attachmentContentField(uid) {
+  if (contentFieldCache) return contentFieldCache;
+  try {
+    const fields = await odooCall(
+      "object",
+      "execute_kw",
+      odooArgs(uid, "ir.attachment", "fields_get", [["datas"]], { attributes: ["type"] }),
+    );
+    contentFieldCache = fields && fields.datas ? "datas" : "raw";
+  } catch {
+    return "raw";
+  }
+  return contentFieldCache;
 }
 
 /**
@@ -415,6 +444,7 @@ export async function attachFilesToSaleOrder({ saleOrderId, files = [] }) {
     }),
   );
   const have = new Set((existing ?? []).map((a) => `${a.name}|${a.file_size}`));
+  const contentField = await attachmentContentField(uid);
 
   const attached = [];
   const skipped = [];
@@ -432,7 +462,7 @@ export async function attachFilesToSaleOrder({ saleOrderId, files = [] }) {
         odooArgs(uid, "ir.attachment", "create", [
           {
             name,
-            datas: f.buffer.toString("base64"),
+            [contentField]: f.buffer.toString("base64"),
             res_model: "sale.order",
             res_id: id,
             type: "binary",
@@ -448,6 +478,185 @@ export async function attachFilesToSaleOrder({ saleOrderId, files = [] }) {
   }
   console.log(`[odoo-write][ATTACH] saleOrder=${id} attached=${JSON.stringify(attached)} skipped=${JSON.stringify(skipped)} failed=${JSON.stringify(failed.map((x) => x.name))}`);
   return { mode: "live", attached, skipped, failed };
+}
+
+/**
+ * The Odoo product category that new products are filed under (it carries the income account, for
+ * example 400000 Service Sales, per company). Set ODOO_PRODUCT_CATEGORY to the category name. When it is
+ * not set, new products get Odoo's own default category, so nothing is assumed here.
+ */
+async function resolveProductCategoryId(uid, warnings) {
+  const wanted = String(process.env.ODOO_PRODUCT_CATEGORY || "").trim();
+  if (!wanted) return null;
+  try {
+    const [cat] = await odooCall(
+      "object",
+      "execute_kw",
+      odooArgs(uid, "product.category", "search_read", [[["name", "=", wanted]]], { fields: ["id"], limit: 1 }),
+    );
+    if (cat?.id) return cat.id;
+    warnings.push(`Product category "${wanted}" was not found in Odoo, so new products use Odoo's default category.`);
+  } catch (err) {
+    warnings.push(`Could not look up the product category "${wanted}" (${err.message}).`);
+  }
+  return null;
+}
+
+// ---- Files on the Odoo product (the reusable part record) ---------------------------------------------
+export const MAX_PRODUCT_FILE_BYTES = 25 * 1024 * 1024;
+const DATE_STAMP_RE = /_\d{4}-\d{2}-\d{2}(?=\.[^./\\]*$|$)/;
+
+/** "drawing_2026-11-26.pdf" -> "drawing.pdf" (used to compare files while ignoring the filing date). */
+export function stripDateStamp(name) {
+  return String(name).replace(DATE_STAMP_RE, "");
+}
+
+/** "drawing.pdf" + "2026-11-26" -> "drawing_2026-11-26.pdf". An existing date stamp is replaced, never doubled. */
+export function stampFilename(name, filedOn) {
+  const clean = stripDateStamp(name);
+  const dot = clean.lastIndexOf(".");
+  return dot > 0 ? `${clean.slice(0, dot)}_${filedOn}${clean.slice(dot)}` : `${clean}_${filedOn}`;
+}
+
+function validFiledOn(value) {
+  const v = String(value ?? "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))) return v;
+  return new Date().toISOString().slice(0, 10);
+}
+
+function productFileProblem(name, err) {
+  const msg = String(err?.message || err || "").replace(/\s+/g, " ").trim();
+  if (/pdf/i.test(msg)) {
+    return `${name} could not be attached to the product because the PDF is password-protected or restricted. It is still attached to the quotation. To add it to the product, re-save the PDF without restrictions and sync again.`;
+  }
+  return `${name} could not be attached to the product (${msg.slice(0, 200) || "unknown error"}). It is still attached to the quotation.`;
+}
+
+/**
+ * Finds the Odoo product for this part number (matched by internal reference / default_code) or creates a
+ * NEW one, and returns { templateId, created }. An existing product is never edited.
+ */
+async function findOrCreatePartProduct(uid, { partNumber, partName }, warnings) {
+  const [found] = await odooCall(
+    "object",
+    "execute_kw",
+    odooArgs(uid, "product.product", "search_read", [[["default_code", "=", partNumber]]], {
+      fields: ["product_tmpl_id"],
+      limit: 1,
+    }),
+  );
+  if (found?.product_tmpl_id) return { templateId: found.product_tmpl_id[0], created: false };
+  const categId = await resolveProductCategoryId(uid, warnings);
+  const templateId = await odooCall(
+    "object",
+    "execute_kw",
+    odooArgs(uid, "product.template", "create", [
+      {
+        name: partName || partNumber,
+        default_code: partNumber,
+        type: "service",
+        list_price: 0,
+        sale_ok: true,
+        purchase_ok: false,
+        company_id: false,
+        ...(categId ? { categ_id: categId } : {}),
+      },
+    ]),
+  );
+  console.log(`[odoo-write][PART_PRODUCT_CREATED] ${partNumber} (product.template ${templateId})`);
+  return { templateId, created: true };
+}
+
+/**
+ * Attaches uploaded files to the Odoo PRODUCT of a part (create only). Each file is named
+ * "<name>_<YYYY-MM-DD>.<ext>" with the date it was filed, and the quote number goes in the description.
+ * A file whose name (ignoring the date) and size already exist on the product is skipped. One file failing
+ * (for example a password-protected PDF, which Odoo refuses on products) never stops the others.
+ * @param {{ files: Array<{originalname:string, mimetype?:string, buffer:Buffer}>,
+ *           assignments: Array<{fileName:string, size:number, partNumber:string, partName?:string}>,
+ *           quoteNumber?: string, filedOn?: string }} params
+ */
+export async function attachFilesToProducts({ files = [], assignments = [], quoteNumber = "", filedOn } = {}) {
+  const result = { mode: isLiveConfigured() ? "live" : "dummy", attached: [], skipped: [], failed: [], warnings: [] };
+  if (!assignments.length) return result;
+  const date = validFiledOn(filedOn);
+  const byKey = new Map(files.map((f) => [`${f.originalname}|${f.buffer.length}`, f]));
+  const byPart = new Map();
+  for (const a of assignments) {
+    const partNumber = String(a?.partNumber ?? "").trim();
+    const file = byKey.get(`${a?.fileName}|${a?.size}`);
+    if (!partNumber || !file) {
+      result.failed.push({ name: a?.fileName || "file", partNumber, error: `${a?.fileName || "A file"} could not be matched to a part number, so it was not attached to a product.` });
+      continue;
+    }
+    if (!byPart.has(partNumber)) byPart.set(partNumber, { partName: a.partName, items: [] });
+    byPart.get(partNumber).items.push(file);
+  }
+
+  if (!isLiveConfigured()) {
+    for (const [partNumber, { items }] of byPart) {
+      for (const f of items) result.attached.push({ name: f.originalname, storedAs: stampFilename(f.originalname, date), partNumber, productCreated: false });
+    }
+    return result;
+  }
+
+  const uid = await odooAuth();
+  const contentField = await attachmentContentField(uid);
+  for (const [partNumber, { partName, items }] of byPart) {
+    let product;
+    try {
+      product = await findOrCreatePartProduct(uid, { partNumber, partName }, result.warnings);
+    } catch (err) {
+      for (const f of items) {
+        result.failed.push({ name: f.originalname, partNumber, error: `${f.originalname} could not be attached because the Odoo product for ${partNumber} could not be found or created (${String(err.message).slice(0, 200)}).` });
+      }
+      continue;
+    }
+    const existing = await odooCall(
+      "object",
+      "execute_kw",
+      odooArgs(uid, "ir.attachment", "search_read", [[["res_model", "=", "product.template"], ["res_id", "=", product.templateId]]], {
+        fields: ["name", "file_size"],
+      }),
+    );
+    const have = new Set((existing ?? []).map((a) => `${stripDateStamp(a.name)}|${a.file_size}`));
+    for (const f of items) {
+      const name = f.originalname;
+      if (f.buffer.length > MAX_PRODUCT_FILE_BYTES) {
+        result.failed.push({ name, partNumber, error: `${name} is larger than 25 MB, so it was not attached to the product.` });
+        continue;
+      }
+      const key = `${stripDateStamp(name)}|${f.buffer.length}`;
+      if (have.has(key)) {
+        result.skipped.push({ name, partNumber });
+        continue;
+      }
+      const storedAs = stampFilename(name, date);
+      try {
+        await odooCall(
+          "object",
+          "execute_kw",
+          odooArgs(uid, "ir.attachment", "create", [
+            {
+              name: storedAs,
+              [contentField]: f.buffer.toString("base64"),
+              res_model: "product.template",
+              res_id: product.templateId,
+              type: "binary",
+              mimetype: f.mimetype || "application/octet-stream",
+              ...(quoteNumber ? { description: `Filed from quote ${String(quoteNumber).slice(0, 40)}` } : {}),
+            },
+          ]),
+        );
+        have.add(key);
+        result.attached.push({ name, storedAs, partNumber, productCreated: product.created });
+      } catch (err) {
+        result.failed.push({ name, partNumber, error: productFileProblem(name, err) });
+      }
+    }
+  }
+  console.log(`[odoo-write][PRODUCT_ATTACH] attached=${result.attached.length} skipped=${result.skipped.length} failed=${result.failed.length}`);
+  return result;
 }
 
 // The operator can choose to reuse the last confirmed price for a customer + part; it then wins over

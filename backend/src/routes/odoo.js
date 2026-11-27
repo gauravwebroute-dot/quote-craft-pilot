@@ -2,12 +2,12 @@ import { Router } from "express";
 import { crossCheckOdoo, listCompanies } from "../services/odooCrossCheck.js";
 import { defaultQuoteStore } from "../lib/quoteStore.js";
 import multer from "multer";
-import { createOdooQuotation, attachFilesToSaleOrder, SafetyError } from "../services/odooCreateQuotation.js";
+import { createOdooQuotation, attachFilesToSaleOrder, attachFilesToProducts, MAX_PRODUCT_FILE_BYTES, SafetyError } from "../services/odooCreateQuotation.js";
 
 const router = Router();
 
 // Files for an Odoo quotation are held in memory only for the request and are never stored by QuotePilot.
-const attachmentUpload = multer({ storage: multer.memoryStorage() });
+const attachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PRODUCT_FILE_BYTES } });
 
 router.post("/odoo/cross-check", async (req, res) => {
   try {
@@ -101,23 +101,63 @@ router.post("/odoo/create-quotation", async (req, res) => {
   }
 });
 
-router.post("/odoo/attachments", attachmentUpload.array("files"), async (req, res) => {
+function parseAssignments(raw) {
+  if (!raw) return [];
   try {
-    const result = await attachFilesToSaleOrder({
-      saleOrderId: req.body?.saleOrderId,
-      files: req.files ?? [],
-    });
-    return res.json(result);
-  } catch (error) {
-    if (error instanceof SafetyError) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: error.message });
-    }
-    console.error("[POST /api/odoo/attachments] failed:", error);
-    return res.status(502).json({
-      error: "ODOO_ATTACH_FAILED",
-      message: error instanceof Error ? error.message : "Attaching files to Odoo failed.",
-    });
+    const list = JSON.parse(String(raw));
+    return Array.isArray(list) ? list.slice(0, 200) : [];
+  } catch {
+    return [];
   }
-});
+}
+
+router.post(
+  "/odoo/attachments",
+  (req, res, next) =>
+    attachmentUpload.array("files")(req, res, (err) => {
+      if (!err) return next();
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ error: "FILE_TOO_LARGE", message: "A file is larger than 25 MB and was not uploaded." });
+      }
+      return res.status(400).json({ error: "BAD_REQUEST", message: "The files could not be read." });
+    }),
+  async (req, res) => {
+    try {
+      const files = req.files ?? [];
+      const result = await attachFilesToSaleOrder({ saleOrderId: req.body?.saleOrderId, files });
+      // Optional: also file selected files on the Odoo product of their part. Never blocks the quotation files.
+      const assignments = parseAssignments(req.body?.productAssignments);
+      if (assignments.length) {
+        try {
+          result.product = await attachFilesToProducts({
+            files,
+            assignments,
+            quoteNumber: req.body?.quoteNumber,
+            filedOn: req.body?.filedOn,
+          });
+        } catch (err) {
+          console.error("[POST /api/odoo/attachments] product files failed:", err);
+          result.product = {
+            attached: [],
+            skipped: [],
+            failed: [],
+            warnings: [],
+            error: "The files could not be attached to the Odoo products: " + String(err?.message || err).slice(0, 200),
+          };
+        }
+      }
+      return res.json(result);
+    } catch (error) {
+      if (error instanceof SafetyError) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: error.message });
+      }
+      console.error("[POST /api/odoo/attachments] failed:", error);
+      return res.status(502).json({
+        error: "ODOO_ATTACH_FAILED",
+        message: error instanceof Error ? error.message : "Attaching files to Odoo failed.",
+      });
+    }
+  },
+);
 
 export default router;
