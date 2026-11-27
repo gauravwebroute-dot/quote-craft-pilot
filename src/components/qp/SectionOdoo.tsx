@@ -211,7 +211,24 @@ export function SectionOdoo({
     skipped: string[];
     failed: Array<{ name: string; error: string }>;
     error?: string;
+    product?: {
+      attached: Array<{
+        name: string;
+        storedAs: string;
+        partNumber: string;
+        productCreated: boolean;
+      }>;
+      skipped: Array<{ name: string; partNumber: string }>;
+      failed: Array<{ name: string; partNumber: string; error: string }>;
+      warnings: string[];
+      error?: string;
+    };
   } | null>(null);
+  // Which files are also filed on the Odoo product of a part: { ticked, part number }. Files are only
+  // available in this upload session, so this is chosen here and sent together with the files.
+  const [productPick, setProductPick] = useState<Record<string, { on?: boolean; part?: string }>>(
+    {},
+  );
   const [isAttaching, setIsAttaching] = useState(false);
   const filesToAttach = (() => {
     const seen = new Set<string>();
@@ -232,6 +249,34 @@ export function SectionOdoo({
     return out;
   })();
 
+  const normKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const partChoices = (extraction?.parts ?? [])
+    .filter((p) => p.partNumber)
+    .map((p) => ({ partNumber: String(p.partNumber), partName: p.partName ?? "" }));
+  // Customer purchase orders and the RFQ email text are order-specific, so they never go on a product.
+  const poFileNames = new Set(
+    extraction?.purchaseOrder && extraction.purchaseOrder.documentType !== "SCOPE_OF_WORK"
+      ? extraction.purchaseOrder.fileNames
+      : [],
+  );
+  const canGoOnProduct = (f: File) => !poFileNames.has(f.name) && !f.name.startsWith("RFQ_email_");
+  const fileKey = (f: File) => `${f.name}|${f.size}`;
+  const pickFor = (f: File): { on: boolean; part: string } => {
+    const saved = productPick[fileKey(f)];
+    const guess =
+      partChoices.find((p) => normKey(f.name).includes(normKey(p.partNumber)))?.partNumber ??
+      (partChoices.length === 1 ? partChoices[0]!.partNumber : "");
+    const part = saved?.part ?? guess;
+    const matchedByName = partChoices.some((p) => normKey(f.name).includes(normKey(p.partNumber)));
+    return { part, on: saved?.on ?? (Boolean(part) && matchedByName) };
+  };
+  const localDate = () => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  };
+
   const attachFiles = async (orderId: number) => {
     if (!filesToAttach.length) {
       setAttachStatus({ attached: [], skipped: [], failed: [] });
@@ -242,10 +287,31 @@ export function SectionOdoo({
       const form = new FormData();
       form.append("saleOrderId", String(orderId));
       filesToAttach.forEach((f) => form.append("files", f, f.name));
+      const assignments = filesToAttach
+        .filter((f) => canGoOnProduct(f) && pickFor(f).on && pickFor(f).part)
+        .map((f) => {
+          const part = partChoices.find((p) => p.partNumber === pickFor(f).part);
+          return {
+            fileName: f.name,
+            size: f.size,
+            partNumber: pickFor(f).part,
+            partName: part?.partName ?? "",
+          };
+        });
+      if (assignments.length) {
+        form.append("productAssignments", JSON.stringify(assignments));
+        form.append("quoteNumber", quoteNumber || "");
+        form.append("filedOn", localDate());
+      }
       const res = await fetch(`${apiUrl()}/api/odoo/attachments`, { method: "POST", body: form });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "Attaching files to Odoo failed.");
-      setAttachStatus({ attached: body.attached ?? [], skipped: body.skipped ?? [], failed: body.failed ?? [] });
+      setAttachStatus({
+        attached: body.attached ?? [],
+        skipped: body.skipped ?? [],
+        failed: body.failed ?? [],
+        product: body.product,
+      });
     } catch (err) {
       setAttachStatus({
         attached: [],
@@ -312,7 +378,14 @@ export function SectionOdoo({
     ? JSON.stringify([
         extraction.customer,
         extraction.parts.map(
-          ({ priceSource: _s, priceSourceManual: _m, rateOverride: _ro, priceOverrideUnit: _o, priceRef: _r, ...rest }) => rest,
+          ({
+            priceSource: _s,
+            priceSourceManual: _m,
+            rateOverride: _ro,
+            priceOverrideUnit: _o,
+            priceRef: _r,
+            ...rest
+          }) => rest,
         ),
         businessUnit,
       ])
@@ -597,16 +670,70 @@ export function SectionOdoo({
         <CardContent className="space-y-2 text-sm">
           <p className="text-muted-foreground">
             These are attached to the quotation when it is created. QuotePilot does not keep the
-            files, so if you reopened this quote on another day, add them again here.
+            files, so if you reopened this quote on another day, add them again here. Tick "Also
+            attach to product" to file a drawing, SOW or STEP file on the Odoo product of its part
+            (dated with today's date). Purchase orders and emails are never filed on a product.
           </p>
           {filesToAttach.length ? (
-            <ul className="list-disc space-y-0.5 pl-5">
-              {filesToAttach.map((f) => (
-                <li key={`${f.name}|${f.size}`}>{f.name}</li>
-              ))}
+            <ul className="space-y-1.5">
+              {filesToAttach.map((f) => {
+                const pick = pickFor(f);
+                return (
+                  <li key={fileKey(f)} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="min-w-0 break-all">{f.name}</span>
+                    {canGoOnProduct(f) && partChoices.length ? (
+                      <span className="flex flex-wrap items-center gap-2 text-xs">
+                        <label className="flex cursor-pointer items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={pick.on}
+                            onChange={(e) =>
+                              setProductPick((cur) => ({
+                                ...cur,
+                                [fileKey(f)]: {
+                                  ...cur[fileKey(f)],
+                                  part: pick.part,
+                                  on: e.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          Also attach to product
+                        </label>
+                        {pick.on ? (
+                          <select
+                            aria-label={`Part for ${f.name}`}
+                            className="rounded-md border border-[#374151] bg-background px-1.5 py-0.5"
+                            value={pick.part}
+                            onChange={(e) =>
+                              setProductPick((cur) => ({
+                                ...cur,
+                                [fileKey(f)]: {
+                                  ...cur[fileKey(f)],
+                                  on: true,
+                                  part: e.target.value,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Select a part</option>
+                            {partChoices.map((p) => (
+                              <option key={p.partNumber} value={p.partNumber}>
+                                {p.partNumber}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
-            <p className="font-medium text-amber-700 dark:text-amber-400">No files to attach yet.</p>
+            <p className="font-medium text-amber-700 dark:text-amber-400">
+              No files to attach yet.
+            </p>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <label className="cursor-pointer rounded-md border border-[#374151] px-3 py-1.5 text-xs font-semibold hover:bg-muted">
@@ -649,8 +776,37 @@ export function SectionOdoo({
               )}
               {attachStatus.failed.length ? (
                 <p className="text-destructive">
-                  Not attached: {attachStatus.failed.map((f) => `${f.name} (${f.error})`).join("; ")}
+                  Not attached:{" "}
+                  {attachStatus.failed.map((f) => `${f.name} (${f.error})`).join("; ")}
                 </p>
+              ) : null}
+              {attachStatus.product ? (
+                <div className="mt-1 space-y-0.5">
+                  {attachStatus.product.error ? (
+                    <p className="text-destructive">{attachStatus.product.error}</p>
+                  ) : (
+                    <p className="text-emerald-700 dark:text-emerald-400">
+                      Filed {attachStatus.product.attached.length} file(s) on Odoo products
+                      {attachStatus.product.skipped.length
+                        ? `, ${attachStatus.product.skipped.length} already on the product`
+                        : ""}
+                      .
+                    </p>
+                  )}
+                  {attachStatus.product.failed.map((f) => (
+                    <p
+                      key={`${f.name}|${f.partNumber}`}
+                      className="text-amber-700 dark:text-amber-400"
+                    >
+                      {f.error}
+                    </p>
+                  ))}
+                  {attachStatus.product.warnings.map((w) => (
+                    <p key={w} className="text-amber-700 dark:text-amber-400">
+                      {w}
+                    </p>
+                  ))}
+                </div>
               ) : null}
             </div>
           ) : null}
