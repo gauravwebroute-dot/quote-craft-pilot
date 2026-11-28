@@ -20,7 +20,22 @@ router.post("/price", (req, res) => {
       });
     }
 
-    const rateCard = mergeRateCard(DEFAULT_RATE_CARD, rateCardOverride);
+    const mergedRateCard = mergeRateCard(DEFAULT_RATE_CARD, rateCardOverride);
+    // Per-quote part marking rates from the Global Rate Settings box (this quote only, never saved as a default).
+    // Work on a copy: with no other override, mergedRateCard IS the shared default object.
+    const pmOv = rateOverrides?.partMarking;
+    const okRate = (v) => v !== undefined && v !== null && v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0;
+    const rateCard =
+      pmOv && typeof pmOv === "object"
+        ? {
+            ...mergedRateCard,
+            partMarking: {
+              ...mergedRateCard.partMarking,
+              ...(okRate(pmOv.minimumCharge) ? { minimumCharge: Number(pmOv.minimumCharge) } : {}),
+              ...(okRate(pmOv.ratePerUnit) ? { ratePerUnit: Number(pmOv.ratePerUnit) } : {}),
+            },
+          }
+        : mergedRateCard;
 
     const results = parts.map((part) => calculatePartPrice(part, rateCard, adjustments, rateOverrides));
 
@@ -97,6 +112,11 @@ router.get("/price/defaults", (_req, res) => {
     ceramic: { coating: cerakote, masking: cerakote * pct },
     other: { coating: cerakote, masking: cerakote * pct },
     chemFilm: rc.chemFilm.ratePerSqIn,
+    chemFilmMinimumLotFee: Number(rc.chemFilm.minimumLotFee) || 0,
+    partMarking: {
+      minimumCharge: Number(rc.partMarking?.minimumCharge) || 0,
+      ratePerUnit: Number(rc.partMarking?.ratePerUnit) || 0,
+    },
   });
 });
 
