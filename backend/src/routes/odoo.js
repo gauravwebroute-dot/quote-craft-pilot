@@ -2,12 +2,21 @@ import { Router } from "express";
 import { crossCheckOdoo, listCompanies } from "../services/odooCrossCheck.js";
 import { defaultQuoteStore } from "../lib/quoteStore.js";
 import multer from "multer";
-import { createOdooQuotation, attachFilesToSaleOrder, attachFilesToProducts, MAX_PRODUCT_FILE_BYTES, SafetyError } from "../services/odooCreateQuotation.js";
+import {
+  createOdooQuotation,
+  attachFilesToSaleOrder,
+  attachFilesToProducts,
+  MAX_PRODUCT_FILE_BYTES,
+  SafetyError,
+} from "../services/odooCreateQuotation.js";
 
 const router = Router();
 
 // Files for an Odoo quotation are held in memory only for the request and are never stored by QuotePilot.
-const attachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PRODUCT_FILE_BYTES } });
+const attachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_PRODUCT_FILE_BYTES },
+});
 
 router.post("/odoo/cross-check", async (req, res) => {
   try {
@@ -101,6 +110,16 @@ router.post("/odoo/create-quotation", async (req, res) => {
   }
 });
 
+function parseKeys(raw) {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(String(raw));
+    return Array.isArray(list) ? list.filter((k) => typeof k === "string").slice(0, 200) : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseAssignments(raw) {
   if (!raw) return [];
   try {
@@ -117,14 +136,29 @@ router.post(
     attachmentUpload.array("files")(req, res, (err) => {
       if (!err) return next();
       if (err.code === "LIMIT_FILE_SIZE") {
-        return res.status(413).json({ error: "FILE_TOO_LARGE", message: "A file is larger than 25 MB and was not uploaded." });
+        return res
+          .status(413)
+          .json({
+            error: "FILE_TOO_LARGE",
+            message: "A file is larger than 25 MB and was not uploaded.",
+          });
       }
-      return res.status(400).json({ error: "BAD_REQUEST", message: "The files could not be read." });
+      return res
+        .status(400)
+        .json({ error: "BAD_REQUEST", message: "The files could not be read." });
     }),
   async (req, res) => {
     try {
       const files = req.files ?? [];
-      const result = await attachFilesToSaleOrder({ saleOrderId: req.body?.saleOrderId, files });
+      // Files added to one part only (Add File in a part row) are filed on that Odoo Product, not on the quotation.
+      const productOnly = new Set(parseKeys(req.body?.productOnlyFiles));
+      const quotationFiles = files.filter(
+        (f) => !productOnly.has(`${f.originalname}|${f.buffer.length}`),
+      );
+      const result = await attachFilesToSaleOrder({
+        saleOrderId: req.body?.saleOrderId,
+        files: quotationFiles,
+      });
       // Optional: also file selected files on the Odoo product of their part. Never blocks the quotation files.
       const assignments = parseAssignments(req.body?.productAssignments);
       if (assignments.length) {
@@ -142,7 +176,9 @@ router.post(
             skipped: [],
             failed: [],
             warnings: [],
-            error: "The files could not be attached to the Odoo products: " + String(err?.message || err).slice(0, 200),
+            error:
+              "The files could not be attached to the Odoo products: " +
+              String(err?.message || err).slice(0, 200),
           };
         }
       }
