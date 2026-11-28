@@ -224,11 +224,12 @@ export function SectionOdoo({
       error?: string;
     };
   } | null>(null);
-  // Which files are also filed on the Odoo product of a part: { ticked, part number }. Files are only
-  // available in this upload session, so this is chosen here and sent together with the files.
-  const [productPick, setProductPick] = useState<Record<string, { on?: boolean; part?: string }>>(
-    {},
-  );
+  // ATTACHMENTS table (one row per part / Odoo product). A part row is ticked by default; unticking it files
+  // nothing on that product. fileOverride holds the files the estimator ticked or unticked by hand, and
+  // partFiles the files added with a row's own Add File button (they go to that product only).
+  const [partOff, setPartOff] = useState<Record<string, boolean>>({});
+  const [fileOverride, setFileOverride] = useState<Record<string, Record<string, boolean>>>({});
+  const [partFiles, setPartFiles] = useState<Record<string, File[]>>({});
   const [isAttaching, setIsAttaching] = useState(false);
   const filesToAttach = (() => {
     const seen = new Set<string>();
@@ -250,26 +251,48 @@ export function SectionOdoo({
   })();
 
   const normKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const partChoices = (extraction?.parts ?? [])
-    .filter((p) => p.partNumber)
-    .map((p) => ({ partNumber: String(p.partNumber), partName: p.partName ?? "" }));
-  // Customer purchase orders and the RFQ email text are order-specific, so they never go on a product.
-  const poFileNames = new Set(
-    extraction?.purchaseOrder && extraction.purchaseOrder.documentType !== "SCOPE_OF_WORK"
-      ? extraction.purchaseOrder.fileNames
-      : [],
-  );
+  const partRows = (extraction?.parts ?? []).map((p) => ({
+    partNumber: p.partNumber ? String(p.partNumber).trim() : "",
+    partName: p.partName ?? "",
+  }));
+  // Purchase orders and the RFQ email text are order-specific, so they never go on a product. A scope of
+  // work (SOW) is ticked automatically for every part.
+  const docKind = extraction?.purchaseOrder?.documentType;
+  const docNames = new Set(extraction?.purchaseOrder?.fileNames ?? []);
+  const poFileNames = docKind && docKind !== "SCOPE_OF_WORK" ? docNames : new Set<string>();
+  const sowFileNames = docKind === "SCOPE_OF_WORK" ? docNames : new Set<string>();
   const canGoOnProduct = (f: File) => !poFileNames.has(f.name) && !f.name.startsWith("RFQ_email_");
   const fileKey = (f: File) => `${f.name}|${f.size}`;
-  const pickFor = (f: File): { on: boolean; part: string } => {
-    const saved = productPick[fileKey(f)];
-    const guess =
-      partChoices.find((p) => normKey(f.name).includes(normKey(p.partNumber)))?.partNumber ??
-      (partChoices.length === 1 ? partChoices[0]!.partNumber : "");
-    const part = saved?.part ?? guess;
-    const matchedByName = partChoices.some((p) => normKey(f.name).includes(normKey(p.partNumber)));
-    return { part, on: saved?.on ?? (Boolean(part) && matchedByName) };
+  const filesForPart = (partNumber: string): File[] => {
+    const seen = new Set<string>();
+    return [...filesToAttach.filter(canGoOnProduct), ...(partFiles[partNumber] ?? [])].filter(
+      (f) => !seen.has(fileKey(f)) && Boolean(seen.add(fileKey(f))),
+    );
   };
+  const isFileOn = (partNumber: string, f: File): boolean => {
+    const saved = fileOverride[partNumber]?.[fileKey(f)];
+    if (saved !== undefined) return saved;
+    return (
+      sowFileNames.has(f.name) ||
+      normKey(f.name).includes(normKey(partNumber)) ||
+      (partFiles[partNumber] ?? []).some((x) => fileKey(x) === fileKey(f))
+    );
+  };
+  // Files that were added to a part only: they are filed on the product, not on the quotation.
+  const productOnlyFiles = (() => {
+    const quotationKeys = new Set(filesToAttach.map(fileKey));
+    const seen = new Set<string>();
+    const out: File[] = [];
+    for (const list of Object.values(partFiles)) {
+      for (const f of list) {
+        if (!quotationKeys.has(fileKey(f)) && !seen.has(fileKey(f))) {
+          seen.add(fileKey(f));
+          out.push(f);
+        }
+      }
+    }
+    return out;
+  })();
   const localDate = () => {
     const d = new Date();
     const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -278,7 +301,7 @@ export function SectionOdoo({
   };
 
   const attachFiles = async (orderId: number) => {
-    if (!filesToAttach.length) {
+    if (!filesToAttach.length && !productOnlyFiles.length) {
       setAttachStatus({ attached: [], skipped: [], failed: [] });
       return;
     }
@@ -287,17 +310,22 @@ export function SectionOdoo({
       const form = new FormData();
       form.append("saleOrderId", String(orderId));
       filesToAttach.forEach((f) => form.append("files", f, f.name));
-      const assignments = filesToAttach
-        .filter((f) => canGoOnProduct(f) && pickFor(f).on && pickFor(f).part)
-        .map((f) => {
-          const part = partChoices.find((p) => p.partNumber === pickFor(f).part);
-          return {
-            fileName: f.name,
-            size: f.size,
-            partNumber: pickFor(f).part,
-            partName: part?.partName ?? "",
-          };
-        });
+      productOnlyFiles.forEach((f) => form.append("files", f, f.name));
+      if (productOnlyFiles.length) {
+        form.append("productOnlyFiles", JSON.stringify(productOnlyFiles.map(fileKey)));
+      }
+      const assignments = partRows
+        .filter((r) => r.partNumber && !partOff[r.partNumber])
+        .flatMap((r) =>
+          filesForPart(r.partNumber)
+            .filter((f) => isFileOn(r.partNumber, f))
+            .map((f) => ({
+              fileName: f.name,
+              size: f.size,
+              partNumber: r.partNumber,
+              partName: r.partName,
+            })),
+        );
       if (assignments.length) {
         form.append("productAssignments", JSON.stringify(assignments));
         form.append("quoteNumber", quoteNumber || "");
@@ -662,82 +690,156 @@ export function SectionOdoo({
         </div>
       </div>
 
-      {/* Files that go to Odoo as attachments (never stored by QuotePilot) */}
+      {/* Notes */}
       <Card className="border-[#374151]/40">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Files for the Odoo quotation</CardTitle>
+          <CardTitle className="text-base">Notes</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm">
+        <CardContent className="text-sm">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>QuotePilot never stores files or drawings.</li>
+            <li>Quote sessions are not saved.</li>
+            <li>
+              New Odoo Products will be created for new products (based on part number). Existing
+              products will have new attachments added to their product folder.
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      {/* ATTACHMENTS: files filed on the Odoo product of each part (never stored by QuotePilot) */}
+      <Card className="border-2 border-[#374151]/60">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base tracking-wide">ATTACHMENTS</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            These are attached to the quotation when it is created. QuotePilot does not keep the
-            files, so if you reopened this quote on another day, add them again here. Tick "Also
-            attach to product" to file a drawing, SOW or STEP file on the Odoo product of its part
-            (dated with today's date). Purchase orders and emails are never filed on a product.
+            Drawings, STEP files and SOW attachments are uploaded to the Odoo Products. Purchase
+            orders and emails are not uploaded to the Odoo Products.
           </p>
-          {filesToAttach.length ? (
-            <ul className="space-y-1.5">
-              {filesToAttach.map((f) => {
-                const pick = pickFor(f);
-                return (
-                  <li key={fileKey(f)} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="min-w-0 break-all">{f.name}</span>
-                    {canGoOnProduct(f) && partChoices.length ? (
-                      <span className="flex flex-wrap items-center gap-2 text-xs">
-                        <label className="flex cursor-pointer items-center gap-1.5">
+          <p className="text-muted-foreground">
+            The items below are attached to the Odoo quote when it is uploaded into Odoo. Files
+            added with a part's Add File button go to that Odoo Product only.
+          </p>
+          {partRows.length ? (
+            <div className="overflow-x-auto rounded-md border border-[#374151]/40">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-[#374151]/40 bg-muted/60 font-semibold">
+                    <th className="px-3 py-2">Part # and Description</th>
+                    <th className="w-16 px-3 py-2 text-center">Attach</th>
+                    <th className="px-3 py-2">Files</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {partRows.map((r, i) => {
+                    const hasNumber = Boolean(r.partNumber);
+                    const on = hasNumber && !partOff[r.partNumber];
+                    const files = hasNumber ? filesForPart(r.partNumber) : [];
+                    const picked = files.filter((f) => isFileOn(r.partNumber, f));
+                    return (
+                      <tr
+                        key={`${r.partNumber}|${i}`}
+                        className="border-b border-[#374151]/20 align-top"
+                      >
+                        <td className="px-3 py-2">
+                          <div className="font-semibold">{r.partNumber || "No part number"}</div>
+                          <div className="text-muted-foreground">{r.partName || "-"}</div>
+                        </td>
+                        <td className="px-3 py-2 text-center">
                           <input
                             type="checkbox"
-                            checked={pick.on}
+                            aria-label={`Attach files to the Odoo Product for ${r.partNumber || "this part"}`}
+                            disabled={!hasNumber}
+                            checked={on}
                             onChange={(e) =>
-                              setProductPick((cur) => ({
-                                ...cur,
-                                [fileKey(f)]: {
-                                  ...cur[fileKey(f)],
-                                  part: pick.part,
-                                  on: e.target.checked,
-                                },
-                              }))
+                              setPartOff((cur) => ({ ...cur, [r.partNumber]: !e.target.checked }))
                             }
                           />
-                          Also attach to product
-                        </label>
-                        {pick.on ? (
-                          <select
-                            aria-label={`Part for ${f.name}`}
-                            className="rounded-md border border-[#374151] bg-background px-1.5 py-0.5"
-                            value={pick.part}
-                            onChange={(e) =>
-                              setProductPick((cur) => ({
-                                ...cur,
-                                [fileKey(f)]: {
-                                  ...cur[fileKey(f)],
-                                  on: true,
-                                  part: e.target.value,
-                                },
-                              }))
-                            }
-                          >
-                            <option value="">Select a part</option>
-                            {partChoices.map((p) => (
-                              <option key={p.partNumber} value={p.partNumber}>
-                                {p.partNumber}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
+                        </td>
+                        <td className="px-3 py-2">
+                          {hasNumber ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <details className="relative">
+                                <summary
+                                  className={`cursor-pointer select-none rounded-md border border-[#374151] px-2.5 py-1 text-xs font-medium ${on ? "" : "opacity-50"}`}
+                                >
+                                  {picked.length} of {files.length} file(s) selected
+                                </summary>
+                                <div className="absolute z-20 mt-1 max-h-60 min-w-64 max-w-md overflow-auto rounded-md border border-[#374151] bg-background p-2 shadow-lg">
+                                  {files.length ? (
+                                    files.map((f) => (
+                                      <label
+                                        key={fileKey(f)}
+                                        className="flex cursor-pointer items-start gap-2 py-1 text-xs"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="mt-0.5"
+                                          checked={isFileOn(r.partNumber, f)}
+                                          onChange={(e) =>
+                                            setFileOverride((cur) => ({
+                                              ...cur,
+                                              [r.partNumber]: {
+                                                ...cur[r.partNumber],
+                                                [fileKey(f)]: e.target.checked,
+                                              },
+                                            }))
+                                          }
+                                        />
+                                        <span className="break-all">
+                                          {f.name}
+                                          {sowFileNames.has(f.name) ? (
+                                            <span className="ml-1 font-semibold text-emerald-700 dark:text-emerald-400">
+                                              (SOW)
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </label>
+                                    ))
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">No files yet.</p>
+                                  )}
+                                </div>
+                              </details>
+                              <label className="cursor-pointer rounded-md border border-[#374151] px-2.5 py-1 text-xs font-semibold hover:bg-muted">
+                                Add File
+                                <input
+                                  type="file"
+                                  multiple
+                                  className="sr-only"
+                                  onChange={(e) => {
+                                    const picked = Array.from(e.target.files ?? []);
+                                    if (picked.length) {
+                                      setPartFiles((cur) => ({
+                                        ...cur,
+                                        [r.partNumber]: [...(cur[r.partNumber] ?? []), ...picked],
+                                      }));
+                                    }
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-amber-700 dark:text-amber-400">
+                              This part has no part number, so no Odoo Product can be matched or
+                              created for it.
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <p className="font-medium text-amber-700 dark:text-amber-400">
-              No files to attach yet.
-            </p>
+            <p className="font-medium text-amber-700 dark:text-amber-400">No parts found.</p>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <label className="cursor-pointer rounded-md border border-[#374151] px-3 py-1.5 text-xs font-semibold hover:bg-muted">
-              Add files
+              Add files to the quotation
               <input
                 type="file"
                 multiple
