@@ -58,7 +58,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides
   const mediaBlasting = {
     totalArea: round2(totalArea),
     timeMinutes: blastTime,
-    timeText: `${blastTime} min/unit`,
+    timeText: `${Math.round(blastTime)} min/unit`, // shown as a whole number; timeMinutes keeps the exact value
     timeRateText: `${blastMinPerSqIn} min/SI`,
     cost: blastCost,
     costText: blastCost === 0 ? "Included ($0.00/SI)" : `$${blastCost.toFixed(2)}`,
@@ -136,13 +136,13 @@ export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides
     processName: docProcess ? `${docProcess} Process` : rc.coating?.processName || `${processLabel} Process`,
     totalArea: round2(totalArea),
     timeMinutes: coatTime,
-    timeText: `${coatTime} min/unit`,
+    timeText: `${Math.round(coatTime)} min/unit`, // shown as a whole number; timeMinutes keeps the exact value
     timeRateText: `${coatMinPerSqIn} min/SI`,
     cost: coatCost,
     costText: `$${coatCost.toFixed(2)}/unit`,
     costRateText: fmtRate(coatRate),
     materialOz,
-    materialText: `${materialOz} oz`,
+    materialText: `${materialOz.toFixed(1)} oz`, // shown with one decimal; materialOz keeps the exact value
     materialRateText: `${materialOzPerSqIn} oz/SI`,
     colorComplexity,
     ovenTime,
@@ -203,8 +203,8 @@ export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides
       lotFee: chemFilmMinFee,
       ratePerSqIn: chemFilmRate,
       text: chemFilmRequested
-        ? `YES – $${chemFilmCharge.toFixed(2)} ($${chemFilmRate.toFixed(2)}/SI; $${chemFilmMinFee} minimum applied once per quote)`
-        : `NO ($${chemFilmRate.toFixed(2)}/SI; $${chemFilmMinFee} minimum applied once per quote)`,
+        ? `YES – $${chemFilmCharge.toFixed(2)}`
+        : "NO",
     },
     rushOrder: {
       cost: rushOrderCost,
@@ -249,7 +249,7 @@ export function calculatePartPrice(part, rateCard, overrides = {}, rateOverrides
     cerakoteWithMasking: fmtRate(coatRate + maskingRate),
     maskingExtra: fmtRate(maskingRate),
     mediaBlasting: "Included ($0.00/SI)",
-    chemFilm: `$${chemFilmRate.toFixed(2)}/SI ($${chemFilmMinFee} minimum applied once per quote)`,
+    chemFilm: `$${chemFilmRate.toFixed(2)}/SI`,
     pricePerUnit: `$${pricePerUnit.toFixed(2)}`,
     totalLineItem: `$${totalLineItem.toFixed(2)}`,
   };

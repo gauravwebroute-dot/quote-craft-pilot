@@ -5,8 +5,14 @@ import { apiBaseUrl } from "@/lib/businessUnits";
 export type RateUnit = "SF" | "SI";
 export type RateClassKey = "powder" | "ceramic" | "other";
 export type ClassOverride = { coating?: number | undefined; masking?: number | undefined };
+/** Part marking is a quote-level charge in plain dollars: a minimum, or a rate per marked unit (whichever is greater). */
+export type PartMarkingOverride = {
+  minimumCharge?: number | undefined;
+  ratePerUnit?: number | undefined;
+};
 export type RateOverrides = Partial<Record<RateClassKey, ClassOverride>> & {
   chemFilm?: number | undefined;
+  partMarking?: PartMarkingOverride | undefined;
 };
 export type RateDefaults = {
   maskingPctOfCoatingRate: number;
@@ -14,6 +20,9 @@ export type RateDefaults = {
   ceramic: { coating: number; masking: number };
   other: { coating: number; masking: number };
   chemFilm: number;
+  /** Chem film minimum lot fee in dollars (applied once per quote). */
+  chemFilmMinimumLotFee?: number;
+  partMarking?: { minimumCharge: number; ratePerUnit: number };
 };
 
 export const SQ_IN_PER_SQ_FT = 144;

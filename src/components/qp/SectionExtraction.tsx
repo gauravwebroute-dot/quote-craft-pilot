@@ -38,6 +38,7 @@ import type { ExtractionResult, ExtractionPart } from "./SectionInput";
 import { downloadOdooCsv } from "@/lib/odooCsvExport";
 import { buildQuoteNotes } from "@/lib/quoteNotes";
 import { fmtRate, useRateDefaults, type RateUnit } from "@/lib/rates";
+import { oneDecimalText, sqFtText, sqInText, wholeText } from "@/lib/displayFormat";
 import { RateInput } from "./RateInput";
 import {
   DEFAULT_BENT_FACTOR,
@@ -376,6 +377,40 @@ function PartDetailCard({
 
       {/* 3 Tabs: Specifications | Pricing Breakdown | Notes & Warnings */}
       <div className="p-4 sm:p-5">
+        {/* Coating type of this part, shown above the tabs so it is visible on every tab */}
+        <div className="mb-4 flex flex-wrap items-center gap-2" aria-label="Coating type">
+          <span className="text-sm font-semibold text-foreground">Coating Type:</span>
+          {(
+            [
+              { key: "powder", label: "Powder" },
+              { key: "ceramic", label: "Cerakote" },
+              { key: "other", label: "Other Coatings" },
+            ] as const
+          ).map((c) => {
+            const on = pricing?.rates?.rateClass === c.key;
+            return (
+              <span
+                key={c.key}
+                className={
+                  on
+                    ? "rounded-md border border-green-700 bg-green-50 px-3 py-1 text-sm font-bold text-green-800"
+                    : "rounded-md border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-medium text-slate-400"
+                }
+              >
+                {c.label}
+              </span>
+            );
+          })}
+          <span
+            className={
+              adjustments?.chemFilm?.applied
+                ? "rounded-md border border-green-700 bg-green-50 px-3 py-1 text-sm font-bold text-green-800"
+                : "rounded-md border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-medium text-slate-400"
+            }
+          >
+            Chem Film
+          </span>
+        </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3 bg-muted/70 p-1 mb-5">
             <TabsTrigger
@@ -477,8 +512,9 @@ function PartDetailCard({
                   editable={false}
                   value={
                     <span className="flex items-center gap-2">
-                      <span className="font-semibold">
-                        {totalArea} sq in ({(totalArea / 144).toFixed(2)} sq ft)
+                      <span className="text-lg font-bold tabular-nums">
+                        {sqInText(totalArea)}
+                        {"\u00A0\u00A0\u00A0"}({sqFtText(totalArea)})
                       </span>
                       {renderConfidenceBadge(part.areaConfidence)}
                     </span>
@@ -498,8 +534,8 @@ function PartDetailCard({
                     }
                   />
                 ) : null}
-                <Field label="Coating Area (Sq In)" value={`${coatingSqIn} sq in`} />
-                <Field label="Masking Area (Sq In)" value={`${maskingSqIn} sq in`} />
+                <Field label="Coating Area (Sq In)" value={sqInText(coatingSqIn)} />
+                <Field label="Masking Area (Sq In)" value={sqInText(maskingSqIn)} />
                 {part.dimensions?.shapeType ? (
                   <Field
                     label="Dimensions / Shape"
@@ -566,14 +602,14 @@ function PartDetailCard({
                               )
                             }
                           >
-                            Use global
+                            Use QP
                           </Button>
                         ) : null}
                       </div>
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    <Label className="text-xs">Enter surface area manually (sq in)</Label>
+                    <Label className="text-xs">Enter surface area manually (Sq In)</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         type="number"
@@ -675,10 +711,10 @@ function PartDetailCard({
                     title="Masking (per unit)"
                     costBadge={masking ? formatMoney(masking.cost) : undefined}
                     rows={[
-                      { label: "Total Area", value: `${masking?.totalArea ?? totalArea} SI` },
+                      { label: "Total Area", value: `${wholeText(masking?.totalArea ?? totalArea)} SI` },
                       {
                         label: "Masked Area",
-                        value: `${masking?.maskedArea ?? part.maskingAreaSqIn ?? 0} SI`,
+                        value: `${wholeText(masking?.maskedArea ?? part.maskingAreaSqIn ?? 0)} SI`,
                       },
                       {
                         label: "Holes",
@@ -699,11 +735,11 @@ function PartDetailCard({
                     title="Media Blasting"
                     costBadge={mediaBlasting?.costText}
                     rows={[
-                      { label: "Total Area", value: `${mediaBlasting?.totalArea ?? totalArea} SI` },
+                      { label: "Total Area", value: `${wholeText(mediaBlasting?.totalArea ?? totalArea)} SI` },
                       {
                         label: "Time",
                         value:
-                          mediaBlasting?.timeText || `${(totalArea * 0.03).toFixed(2)} min/unit`,
+                          mediaBlasting?.timeText || `${wholeText(totalArea * 0.03)} min/unit`,
                         parenthetical: mediaBlasting?.timeRateText || "0.03 min/SI",
                       },
                     ]}
@@ -718,7 +754,7 @@ function PartDetailCard({
                     rows={[
                       {
                         label: "Total Area",
-                        value: `${coating?.totalArea ?? totalArea} SI (${((coating?.totalArea ?? totalArea) / 144).toFixed(2)} SF)`,
+                        value: `${wholeText(coating?.totalArea ?? totalArea)} SI (${oneDecimalText((coating?.totalArea ?? totalArea) / 144)} SF)`,
                       },
                       {
                         label: "Time",
@@ -1291,9 +1327,9 @@ export function SectionExtraction({
       area:
         displayArea === 0
           ? "Unknown"
-          : `${part.areaSource === "sow_estimate" ? "≈ " : ""}${displayArea} sq in`,
+          : `${part.areaSource === "sow_estimate" ? "≈ " : ""}${wholeText(displayArea)} Sq In`,
       areaTag: [
-        displayArea > 0 ? `${(displayArea / 144).toFixed(1)} SF` : "",
+        displayArea > 0 ? sqFtText(displayArea) : "",
         part.areaSource === "sow_estimate"
           ? "est. from SOW size"
           : part.areaSource === "manual"
@@ -1477,7 +1513,6 @@ export function SectionExtraction({
                       <Field
                         label="Request DD (Due Date)"
                         value={extraction.customer.requestDueDate || "Not specified"}
-                        warn={!extraction.customer.requestDueDate}
                       />
                       <Field
                         label="Request Summary"
@@ -1558,7 +1593,7 @@ export function SectionExtraction({
               <CardContent className="p-0">
                 {/* Table Layout - Wide and responsive with no horizontal scrolling on 1024px+ viewports */}
                 <div className="w-full overflow-x-auto">
-                  <table className="w-full table-fixed border-collapse text-left text-xs xl:text-sm">
+                  <table className="w-full table-fixed border-collapse text-left text-sm xl:text-base">
                     <colgroup>
                       <col className="w-[3%]" />
                       <col className="w-[11%]" />
@@ -1572,13 +1607,13 @@ export function SectionExtraction({
                       <col className="w-[10%]" />
                     </colgroup>
                     <thead>
-                      <tr className="border-b border-slate-300 bg-slate-100/90 font-semibold text-slate-800 dark:border-border dark:bg-muted/80 dark:text-slate-200">
+                      <tr className="border-b border-slate-300 bg-slate-100/90 font-bold text-slate-800 dark:border-border dark:bg-muted/80 dark:text-slate-200">
                         <th className="border-r border-slate-300 px-1 py-3 text-center">#</th>
                         <th className="border-r border-slate-300 px-2 py-3">Part Number</th>
                         <th className="border-r border-slate-300 px-2 py-3">Name / Description</th>
                         <th className="border-r border-slate-300 px-1.5 py-3 text-center">Rev</th>
                         <th className="border-r border-slate-300 px-2 py-3 text-right">
-                          Sq. In. / Unit
+                          Sq In / Unit
                         </th>
                         <th className="border-r border-slate-300 px-2 py-3">Work Type</th>
                         <th className="border-r border-slate-300 px-1.5 py-3 text-center" title="Part marking (laser engraving after coating)">
